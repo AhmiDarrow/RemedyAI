@@ -41,6 +41,9 @@ type CognitionTurnRunner struct {
 	Registry     *tools.Registry
 	// LiveContext is the host-observed page for money/credential checkpoints.
 	LiveContext func(sessionID string) string
+	// MemoryDBPath is the server's memory.db, for the turn end's memory
+	// consolidation. Empty skips it.
+	MemoryDBPath string
 	// PromptSources feeds the native prompt (memory, plan, checklist). The
 	// server sets it; a bare runner in a test has none and sends no system
 	// prompt.
@@ -375,18 +378,22 @@ func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Ou
 	// The soul update is a few local file writes. It finishes before the turn
 	// returns, so the next turn reads it and nothing is still writing to the
 	// home folder once the caller moves on.
-	func() {
+	safely := func(step func()) {
 		defer func() { _ = recover() }()
-		r.updateSoulAfterTurn(reqCopy, snapshot)
-	}()
-	if r.nativeOn() {
-		// Skill learning is local file work too, and for the same reason it
-		// finishes before the turn returns.
-		func() {
-			defer func() { _ = recover() }()
-			r.learnFromTurn(reqCopy, snapshot)
-		}()
+		step()
 	}
+	safely(func() { r.updateSoulAfterTurn(reqCopy, snapshot) })
+	if r.nativeOn() {
+		// Skill learning, the learned-skill lifecycle tick and memory
+		// consolidation are local file and SQLite work too, and for the same
+		// reason they finish before the turn returns. The tick runs first, as
+		// the old schedule_post_turn_prep did before the skill was learned.
+		safely(func() { r.tickSkillsAfterTurn(reqCopy) })
+		safely(func() { r.consolidateMemoryAfterTurn(reqCopy) })
+		safely(func() { r.learnFromTurn(reqCopy, snapshot) })
+	}
+	// What the owner's message says about the last suggestion, into alive.json.
+	safely(func() { r.noteOutcomeAfterTurn(reqCopy, snapshot) })
 }
 
 // learnFromTurn turns a real stretch of successful tool work into a learned

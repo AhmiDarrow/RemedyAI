@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+// The turn end's learning, grading, lifecycle tick, consolidation and alive
+// outcome run natively in httpapi; only the retired parts stay missing.
+func TestTurnEndMissingIsOnlyWhatWasRetired(t *testing.T) {
+	got := Missing(OpTurnEnd, Env{}, nil)
+	want := []string{"turn_end:metabolism", "turn_end:skill_genome"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Missing(turn_end)=%v want %v", got, want)
+	}
+	if got := Missing(OpAfterToolBatch, Env{}, nil); strings.Join(got, ",") != "after_tool_batch:metabolism" {
+		t.Fatalf("Missing(after_tool_batch)=%v", got)
+	}
+	if TurnEnd(Env{}, nil).Complete() {
+		t.Fatal("prompt.TurnEnd must still report itself incomplete")
+	}
+}
+
 type fakeSources struct{ memory, plan, todos string }
 
 func (f fakeSources) MemoryBlock(string, string) string { return f.memory }

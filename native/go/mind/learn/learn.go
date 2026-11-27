@@ -48,6 +48,8 @@ func FromTurn(t Turn) (Outcome, error) {
 		now = time.Now
 	}
 	steps := normalizeSteps(t.Steps)
+	skillsMu.Lock()
+	defer skillsMu.Unlock()
 	var out Outcome
 	var errs []error
 	// agent.py 1217: an interrupted turn is never learned from, only graded.

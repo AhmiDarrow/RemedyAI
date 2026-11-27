@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/drives"
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/learn"
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 )
 
@@ -433,9 +434,14 @@ func (s *Server) hearthPulseNight(_ context.Context) {
 	}
 }
 
-// hearthPulseLearn runs one unattended organism tick (dream when due,
-// compact, drive drift) in-process and reports whether anything changed.
-// Skill promote/prune and self-inject are not part of it. Never calls a provider.
+// skillTickEvery spaces the learn clock's learned-skill lifecycle ticks, as
+// self_inject._SKILL_TICK_TTL did. Turn ends tick on their own.
+const skillTickEvery = 10 * time.Minute
+
+// hearthPulseLearn runs one unattended organism tick (learned-skill
+// promote/prune at most every 10 minutes, dream when due, compact, drive
+// drift) in-process and reports whether anything changed. Code self-inject
+// is not part of it. Never calls a provider.
 func (s *Server) hearthPulseLearn(_ context.Context) bool {
 	if s == nil {
 		return false
@@ -447,9 +453,28 @@ func (s *Server) hearthPulseLearn(_ context.Context) bool {
 	s.innerAct.Store("learning")
 	defer s.innerAct.Store("")
 	started := time.Now()
-	rep, err := drives.OrganismTick(env)
-	appendLearnLog(s.homeDir, "improve", time.Since(started), false, err, rep.ChangedMap())
+	refined, skillErr := s.hearthSkillTick(started)
+	rep, err := drives.OrganismTickWith(env, refined)
+	appendLearnLog(s.homeDir, "improve", time.Since(started), false, errors.Join(skillErr, err), rep.ChangedMap())
 	return rep.Changed
+}
+
+// hearthSkillTick is _organism_tick's tick_learned_skills: it returns how
+// many learned skills changed status. Skipped within skillTickEvery of the
+// last one; a failed tick is retried on the next pulse.
+func (s *Server) hearthSkillTick(now time.Time) (int, error) {
+	last := s.skillTickAt.Load()
+	if last != 0 && now.Sub(time.Unix(0, last)) < skillTickEvery {
+		return 0, nil
+	}
+	changes, err := learn.TickLearnedSkills(ResolveHomeDir(s.homeDir), now, 0)
+	if err == nil {
+		s.skillTickAt.Store(now.UnixNano())
+	}
+	for _, c := range changes {
+		logSkillChange(c)
+	}
+	return len(changes), err
 }
 
 // nextLearnInterval chooses the delay until the next unattended learn tick.
