@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
@@ -66,6 +69,9 @@ func generationOptionsFor(cfg ConfigMap, provider, model string) providers.Gener
 // validateGenerationPatch normalizes the reasoning/context keys of a settings
 // patch in place. 0 or "" clears a key (back to the provider default).
 func validateGenerationPatch(patch map[string]any) error {
+	if err := checkTokenCounts(patch, ""); err != nil {
+		return err
+	}
 	single := map[string]any{}
 	for _, k := range generationKeys {
 		if v, ok := patch[k]; ok && v != nil {
@@ -97,6 +103,9 @@ func validateGenerationPatch(patch map[string]any) error {
 				return fmt.Errorf("model_settings[%q]: unknown key %q", model, k)
 			}
 		}
+		if err := checkTokenCounts(entry, fmt.Sprintf("model_settings[%q]: ", model)); err != nil {
+			return err
+		}
 		o, err := generationFromMap(entry)
 		if err != nil {
 			return fmt.Errorf("model_settings[%q]: %w", model, err)
@@ -104,6 +113,46 @@ func validateGenerationPatch(patch map[string]any) error {
 		clean := map[string]any{}
 		writeGeneration(clean, entry, o)
 		table[model] = clean
+	}
+	return nil
+}
+
+// checkTokenCounts refuses a token count that is not a number, so "lots" or
+// true is an error rather than silently clearing the setting (Python
+// generation_settings._token_count). Unset (nil or "") is allowed.
+func checkTokenCounts(m map[string]any, prefix string) error {
+	for _, k := range []string{cfgThinkingBudget, cfgMaxOutputTokens, cfgContextWindow} {
+		v, ok := m[k]
+		if !ok || v == nil {
+			continue
+		}
+		bad := false
+		switch t := v.(type) {
+		case bool:
+			bad = true
+		case int, int64, int32:
+		case float64:
+			bad = math.IsNaN(t) || math.IsInf(t, 0)
+		case json.Number:
+			f, err := t.Float64()
+			bad = err != nil || math.IsNaN(f) || math.IsInf(f, 0)
+		case string:
+			s := strings.TrimSpace(t)
+			if s == "" {
+				continue
+			}
+			f, err := strconv.ParseFloat(s, 64)
+			bad = err != nil || math.IsNaN(f) || math.IsInf(f, 0)
+			if !bad {
+				// anyInt only reads whole numbers from text; keep "8000.0" usable.
+				m[k] = int(f)
+			}
+		default:
+			bad = true
+		}
+		if bad {
+			return fmt.Errorf("%s%s must be a number, got %v", prefix, k, v)
+		}
 	}
 	return nil
 }
