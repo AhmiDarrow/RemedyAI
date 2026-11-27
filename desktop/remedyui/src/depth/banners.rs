@@ -591,23 +591,17 @@ fn ticker_row(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let run = studio.depth.usage_run.get();
     let session = studio.depth.usage_session.get();
-    let hide_cost = studio.depth.hide_cost.get();
     let run_line = usage_line(
         &messages().text(ui, "cost-run"),
         run.input,
         run.output,
-        run.cost,
-        hide_cost,
     );
     let session_line = usage_line(
         &messages().text(ui, "cost-session"),
         session.input,
         session.output,
-        session.cost,
-        hide_cost,
     );
     let st_hide = studio.clone();
-    let st_cost = studio.clone();
     let u = ui.clone();
     w::row(ui)
         .align(Align::Center)
@@ -628,25 +622,12 @@ fn ticker_row(ui: &Ui, studio: Studio) -> El {
             )
             .variant("quiet"),
         )
-        .child(
-            w::button(
-                ui,
-                {
-                    let u = ui.clone();
-                    move || messages().text(&u, "cost-hide-price")
-                },
-                move || st_cost.depth.hide_cost.update(|v| *v = !*v),
-            )
-            .variant("quiet"),
-        )
 }
 
-fn usage_line(label: &str, input: u64, output: u64, cost: Option<f64>, hide_cost: bool) -> String {
-    let mut line = format!("{label}  {} in · {} out", compact(input), compact(output));
-    if let Some(cost) = cost.filter(|_| !hide_cost) {
-        line.push_str(&format!("  ${cost:.4}"));
-    }
-    line
+/// Tokens in and out. There is no price beside them: Remedy has no price
+/// list, and a figure of her own would be a guess.
+fn usage_line(label: &str, input: u64, output: u64) -> String {
+    format!("{label}  {} in · {} out", compact(input), compact(output))
 }
 
 fn compact(n: u64) -> String {

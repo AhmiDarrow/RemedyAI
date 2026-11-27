@@ -423,6 +423,37 @@ fn with_inner(mood: Mood) -> Mood {
     }
 }
 
+thread_local! {
+    /// Whether the runtime was last told the owner is typing, and when.
+    static TYPING: Cell<(bool, Option<std::time::Instant>)> = const { Cell::new((false, None)) };
+}
+
+/// The owner is typing to her (or has emptied the box). The runtime is told,
+/// so her curious face shows on every surface and not only in this pane. A
+/// note counts for a few seconds there, so it is repeated while typing goes
+/// on, and sent once when the box empties.
+pub fn note_typing(studio: &Studio, typing: bool) {
+    let (was, at) = TYPING.with(|c| c.get());
+    let fresh = at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3));
+    if typing == was && (fresh || !typing) {
+        return;
+    }
+    TYPING.with(|c| c.set((typing, Some(std::time::Instant::now()))));
+    if studio.local_only {
+        return;
+    }
+    if let Some(client) = studio.runtime() {
+        let body = serde_json::json!({ "typing": typing });
+        crate::depth::api::spawn_json(&client, remedy_ui::net::Request::post("presence/typing").json(&body), |_| {});
+    }
+}
+
+/// The runtime's word for a mood, as a face. None for a word this build does
+/// not know, so an older build falls back to its own reading.
+pub fn mood_named(key: &str) -> Option<Mood> {
+    Mood::all().into_iter().find(|m| m.key() == key)
+}
+
 pub fn from_studio(studio: &Studio) -> Mood {
     // Recount only when the session list changes size; the count is what growth reads.
     let n = studio.sessions.get().len() as u32;
@@ -431,6 +462,15 @@ pub fn from_studio(studio: &Studio) -> Mood {
         let facts = face_skin::Facts::from_studio(studio);
         FACTS.with(|c| c.set(facts));
         grow_face(facts, 0);
+    }
+    // One mood everywhere: the runtime decides it from what she is doing.
+    // Only a window that cannot reach the runtime shows its own (error) face,
+    // and one that has not heard yet reads it locally.
+    if !matches!(studio.conn.get(), Conn::Error(_)) {
+        if let Some(mood) = mood_named(&studio.server_mood.get()) {
+            // "idle" from a runtime that is connected is her listening face.
+            return if mood == Mood::Idle && matches!(studio.conn.get(), Conn::Ready) { Mood::Listening } else { mood };
+        }
     }
     with_inner(mood_from(studio))
 }

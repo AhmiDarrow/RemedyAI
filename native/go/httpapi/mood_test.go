@@ -48,6 +48,26 @@ func TestMoodIsOneRuleFromWhatSheIsDoing(t *testing.T) {
 	if got := s.currentMood(); got != "error" {
 		t.Fatalf("all failed: %s", got)
 	}
+	// The owner typing has her attention; a first message, before she has
+	// said anything, surprises her.
+	s.mood.lastAt = time.Time{}
+	s.moodTyping(true)
+	if got := s.currentMood(); got != "curious" {
+		t.Fatalf("typing: %s", got)
+	}
+	s.moodTyping(false)
+	if got := s.currentMood(); got != "idle" {
+		t.Fatalf("stopped typing: %s", got)
+	}
+	s.moodNote("first", func(p *moodPhase) { p.first = true })
+	if got := s.currentMood(); got != "surprised" {
+		t.Fatalf("first message: %s", got)
+	}
+	s.moodNote("first", func(p *moodPhase) { p.spoke = true })
+	if got := s.currentMood(); got != "working" {
+		t.Fatalf("once she speaks: %s", got)
+	}
+	s.moodEnd("first")
 	// Her own work shows when no turn is running, and a turn comes first.
 	s.mood.lastAt = time.Time{}
 	s.innerAct.Store("learning")

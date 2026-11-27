@@ -55,6 +55,36 @@ pub fn day_label(rfc3339: &str) -> String {
     format!("{}, {} {}", WDAYS[wday], MONTHS[(mo - 1) as usize], day)
 }
 
+/// A clock time from seconds on the local wall clock, e.g. `2:14 PM`.
+pub fn clock(local_seconds: i64) -> String {
+    let day = local_seconds.rem_euclid(86_400);
+    let (h, m) = (day / 3600, day % 3600 / 60);
+    let (h12, half) = match h {
+        0 => (12, "AM"),
+        1..=11 => (h, "AM"),
+        12 => (12, "PM"),
+        _ => (h - 12, "PM"),
+    };
+    format!("{h12}:{m:02} {half}")
+}
+
+/// Unix seconds as `2026-11-22T20:00:00Z`, the form the runtime stores.
+pub fn rfc3339(unix_seconds: i64) -> String {
+    let days = unix_seconds.div_euclid(86_400);
+    let secs = unix_seconds.rem_euclid(86_400);
+    // Days to civil date (Gregorian).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", secs / 3600, secs % 3600 / 60, secs % 60)
+}
+
 /// Unix seconds now.
 pub fn now_secs() -> i64 {
     SystemTime::now()
@@ -109,6 +139,19 @@ mod tests {
             "1h ago",
             "preview clock and parser stay in lockstep"
         );
+    }
+
+    #[test]
+    fn clock_and_stored_form() {
+        assert_eq!(clock(0), "12:00 AM");
+        assert_eq!(clock(13 * 3600 + 5 * 60), "1:05 PM");
+        assert_eq!(clock(12 * 3600), "12:00 PM");
+        assert_eq!(clock(-60), "11:59 PM");
+        // The stored form reads back as the same instant.
+        for t in [0, 1_795_381_200, 951_782_399, 951_782_400, 1_709_251_199] {
+            assert_eq!(parse_rfc3339(&rfc3339(t)), Some(t), "{t}");
+        }
+        assert_eq!(rfc3339(1_795_381_200), "2026-11-22T21:00:00Z");
     }
 
     #[test]

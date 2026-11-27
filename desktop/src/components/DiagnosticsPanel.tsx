@@ -10,7 +10,7 @@ import {
   type DiagnosticsSnapshot,
   type SelfInjectRoundsPayload,
 } from '../api/diagnostics'
-import { formatCost, formatTokens } from '../utils/tokenCost'
+import { formatTokens } from '../utils/tokenCost'
 import { browserStackHold } from '../utils/browserStack'
 import { HiveInspector } from './HiveInspector'
 
@@ -627,7 +627,6 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
                           <tr style={{ color: 'var(--text-muted)' }}>
                             <th className="text-left py-0.5">Provider</th>
                             <th className="text-right">Tokens</th>
-                            <th className="text-right">Cost</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -642,9 +641,6 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
                               <td className="py-1">{u.provider || '—'}</td>
                               <td className="text-right tabular-nums">
                                 {formatTokens(Number(u.total_tokens || 0))}
-                              </td>
-                              <td className="text-right tabular-nums">
-                                {formatCost(Number(u.estimated_cost_usd || 0))}
                               </td>
                             </tr>
                           ))}

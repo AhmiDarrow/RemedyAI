@@ -165,12 +165,13 @@ checkpoints after that point, and clears the live session brief.
 API: `GET /api/sessions/{id}/timeline`, `POST /api/sessions/{id}/time-travel`
 with `{ "message_id": "…" }`.
 
-## Token & cost ticker
+## Token ticker
 
-A small **Usage** chip (bottom-right) tracks tokens and estimated API cost for
-the current run and the session. Expand for in/out breakdown and model. Hide
-with **×** (re-open from the `$ tokens` chip). Prefers provider-reported usage
-when available; otherwise estimates from text + published list prices.
+A small **Usage** line tracks tokens for the current run and the session:
+tokens in and out, and how much the provider served from its prompt cache.
+It prefers the counts the provider reports and estimates from the text until
+they arrive. It shows no cost: Remedy has no price list, and what a provider
+bills is on the provider's own usage page.
 
 ## Mid-task checkpoints (Build)
 

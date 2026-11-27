@@ -324,6 +324,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExportSession)
 	s.mux.HandleFunc("POST /api/sessions/{id}/steer", s.handleSteerSession)
+	s.mux.HandleFunc("POST /api/presence/typing", s.handlePresenceTyping)
 	s.mux.HandleFunc("GET /api/sessions/{id}/todos", s.handleSessionTodos)
 	s.mux.HandleFunc("GET /api/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("POST /api/sessions/{id}/time-travel", s.handleSessionTimeTravel)
