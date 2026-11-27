@@ -342,6 +342,46 @@ func isSubscriptionOAuthToken(key string) bool {
 	return strings.HasPrefix(low, "sk-ant-oat") || strings.HasPrefix(low, "sk-ant-sid")
 }
 
+// subscriptionTokenMessage is why a Claude Code / Max login token is refused
+// (Python anthropic_auth.SUBSCRIPTION_TOKEN_MESSAGE, word for word).
+const subscriptionTokenMessage = "That looks like a Claude Code / Max login token (sk-ant-oat…), " +
+	"not a Console API key. Anthropic only allows those tokens inside " +
+	"official Claude Code — pasting them here can lock the account.\n\n" +
+	"To use Claude in Remedy: paste a Console API key (sk-ant-api…) " +
+	"from https://console.anthropic.com/settings/keys and add API " +
+	"credits. A Claude Pro / Max plan does not pay for this API."
+
+// providerKeyTarget is where an API key is filed: under the provider that
+// issued it when its prefix says so, else under the named provider. A Claude
+// subscription token is refused (Python config.set_provider_key).
+func providerKeyTarget(provider, key string) (string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if owner := inferKeyOwner(key); owner != "" {
+		provider = owner
+	}
+	if (provider == "anthropic" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "sk-ant-")) &&
+		isSubscriptionOAuthToken(key) {
+		return "", settingsValueError{msg: subscriptionTokenMessage}
+	}
+	return provider, nil
+}
+
+// storeProviderAPIKey files key in the secure store under the provider that
+// owns it and returns that provider.
+func storeProviderAPIKey(home, provider, key string) (string, error) {
+	target, err := providerKeyTarget(provider, key)
+	if err != nil {
+		return "", err
+	}
+	if target == "" {
+		return "", settingsValueError{msg: "provider required"}
+	}
+	if err := secret.SetProviderSecret(home, target, key); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 func (s *Server) handleProbeProvider(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {

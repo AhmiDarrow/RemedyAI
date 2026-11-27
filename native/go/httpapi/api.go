@@ -143,6 +143,12 @@ type Server struct {
 	// interopLive bounds concurrent inbound session turns and tracks
 	// in-flight task cancellation / SSE subscribers.
 	interopLive *interopLiveCtl
+
+	// interopForceInbound and interopBindHost are set only by the
+	// `remedy mcp serve --http` listener (cli_system.go): that command turns
+	// inbound on for its own port and names its own bind host.
+	interopForceInbound bool
+	interopBindHost     string
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,

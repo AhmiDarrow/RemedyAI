@@ -261,6 +261,12 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	if err := validateGenerationPatch(patch); err != nil {
 		return nil, settingsValueError{msg: err.Error()}
 	}
+	// Refuse a Claude subscription token before anything is written.
+	if rawKey, ok := patch["llm_api_key"]; ok {
+		if _, err := providerKeyTarget(provider, strings.TrimSpace(fmt.Sprint(rawKey))); err != nil {
+			return nil, err
+		}
+	}
 	mergeModelSettings(patch, cfg)
 
 	messengersUpdate, _ := patch["messengers"].(map[string]any)
@@ -330,7 +336,9 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	if hasKey {
 		key := strings.TrimSpace(fmt.Sprint(incomingKey))
 		if key != "" {
-			if err := secret.SetProviderSecret(home, provider, key); err != nil {
+			// Filed under the provider that issued it (sk-ant-… → anthropic even
+			// while the Type is still xAI), as Python set_provider_key did.
+			if _, err := storeProviderAPIKey(home, provider, key); err != nil {
 				return nil, err
 			}
 		}

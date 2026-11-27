@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"runtime"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/cli"
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/parentwatch"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
@@ -24,6 +25,8 @@ import (
 const (
 	protocolVersion = 1
 	toolABIVersion  = 1
+	// cliVersion tells the Python `remedy` launcher this build carries the CLI.
+	cliVersion = 1
 	// defaultServeAddr is the production loopback listen for --serve.
 	defaultServeAddr = "127.0.0.1:7400"
 )
@@ -34,6 +37,7 @@ type probeResult struct {
 	ToolABI  int    `json:"tool_abi"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
+	CLI      int    `json:"cli"`
 }
 
 func currentProbe() probeResult {
@@ -43,6 +47,7 @@ func currentProbe() probeResult {
 		ToolABI:  toolABIVersion,
 		OS:       runtime.GOOS,
 		Arch:     runtime.GOARCH,
+		CLI:      cliVersion,
 	}
 }
 
@@ -59,6 +64,17 @@ func resolveServeAddr(listen string, serve bool) string {
 }
 
 func main() {
+	// `remedy <command>`: the Python launcher execs this binary with the
+	// user's argv, so the CLI lives here. Runtime flags (--probe, --serve,
+	// --listen) fall through to the flag parser below.
+	if args := os.Args[1:]; cli.IsCLI(args) {
+		os.Exit(cli.Run(args, os.Stdout, os.Stderr, os.Stdin, cli.Hooks{
+			Serve: func(addr, home string, onBound func(string)) int {
+				return serveRuntime(addr, home, false, onBound)
+			},
+		}, httpapi.Version))
+	}
+
 	probe := flag.Bool("probe", false, "emit one JSON readiness record and exit")
 	listen := flag.String("listen", "", "loopback HTTP listen address (overrides --serve default; e.g. 127.0.0.1:7410 or 127.0.0.1:0)")
 	serve := flag.Bool("serve", false, "serve the production local HTTP API (defaults --listen to 127.0.0.1:7400)")
@@ -79,6 +95,13 @@ func main() {
 		os.Exit(2)
 	}
 
+	os.Exit(serveRuntime(addr, httpapi.ResolveHomeDir(""), *smokeFixture, nil))
+}
+
+// serveRuntime runs the production local API on addr until interrupted and
+// returns the process exit code. onBound, when set, also runs once the
+// listener is up (remedy serve prints the WebUI link from it).
+func serveRuntime(addr, home string, smoke bool, onBound func(string)) int {
 	// Desktop sidecar on macOS: exit when the GUI parent dies (Linux uses
 	// PR_SET_PDEATHSIG; Windows uses a kill-on-close job object).
 	parentwatch.StartIfDesktopSidecar()
@@ -88,11 +111,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), notify...)
 	defer stop()
 
-	home := httpapi.ResolveHomeDir("")
 	serveLock := servelock.New(home)
 	if ok, msg := serveLock.TryAcquire(); !ok {
 		fmt.Fprintln(os.Stderr, msg)
-		os.Exit(1)
+		return 1
 	}
 	defer serveLock.Release()
 	go serveLock.RunHeartbeat(ctx)
@@ -104,13 +126,13 @@ func main() {
 	// the file.
 	if _, err := secret.EnsureHostSigningKey(""); err != nil {
 		fmt.Fprintf(os.Stderr, "remedy-runtime host signing key: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	var runner httpapi.TurnRunner
 	var voiceWorker httpapi.VoiceWorker
 	var visionWorker httpapi.VisionWorker
-	if *smokeFixture {
+	if smoke {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
 		// Per-turn ResolveChatModel: xAI OAuth bearer, then vision helper, else Scripted.
@@ -135,15 +157,19 @@ func main() {
 		VoiceWorker:  voiceWorker,
 		VisionWorker: visionWorker,
 		// The real runtime keeps the managed ClaimIDX host (off in --smoke runs).
-		ManageClaimidx: !*smokeFixture,
+		ManageClaimidx: !smoke,
 		// So does the local search engine web.search prefers.
-		ManageSearchHost: !*smokeFixture,
+		ManageSearchHost: !smoke,
 		HomeDir:          home,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
+		if onBound != nil {
+			onBound(bound)
+		}
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "remedy-runtime serve failed: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
