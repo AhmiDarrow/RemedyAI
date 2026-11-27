@@ -199,8 +199,6 @@ jobs:
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
           python scripts/check_remedy_core_isa.py desktop/bin/remedy_core.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
@@ -212,8 +210,6 @@ jobs:
             desktop/bin/remedy-iroh.exe
             desktop/bin/remedy-iroh-x86_64-pc-windows-msvc.exe
             desktop/bin/remedy_core.dll
-            desktop/bin/rmdy_tool_worker.pyz
-            desktop/bin/rmdy-deps/**
           retention-days: 7
 
       # Cheap cross-compile: same windows-latest runner, no extra hosted ARM VM.
@@ -408,7 +404,6 @@ jobs:
           cp native/iroh/target/release/remedy-iroh desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
           chmod +x desktop/bin/remedy-iroh desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
           python scripts/check_remedy_core_isa.py desktop/bin/libremedy_core.so
-          python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps
 
       - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v4
@@ -420,8 +415,6 @@ jobs:
             desktop/bin/remedy-iroh
             desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
             desktop/bin/libremedy_core.so
-            desktop/bin/rmdy_tool_worker.pyz
-            desktop/bin/rmdy-deps/**
           retention-days: 7
 
   build-runtime-linux-arm:
@@ -649,13 +642,11 @@ jobs:
             go_triple: aarch64-apple-darwin
             asset_arch: aarch64
             smoke: true
-            deps_platform: aarch64-apple-darwin
             runner: macos-15
           - rust_target: x86_64-apple-darwin
             go_triple: x86_64-apple-darwin
             asset_arch: x64
             smoke: false
-            deps_platform: x86_64-apple-darwin
             runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -684,7 +675,6 @@ jobs:
       - name: Stage arch-specific sidecar, dylib, and worker deps
         env:
           GO_TRIPLE: ${{ matrix.go_triple }}
-          DEPS_PLATFORM: ${{ matrix.deps_platform }}
         run: |
           set -euo pipefail
           mkdir -p desktop/bin
@@ -693,7 +683,6 @@ jobs:
           chmod +x desktop/bin/remedy-runtime
           chmod +x "desktop/bin/remedy-iroh-${GO_TRIPLE}"
           cp -f "desktop/bin/libremedy_core-${GO_TRIPLE}.dylib" desktop/bin/libremedy_core.dylib
-          python3 scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps --deps-platform "${DEPS_PLATFORM}"
 
       - name: Stamp release version (match runtime job)
         shell: bash

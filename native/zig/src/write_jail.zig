@@ -118,10 +118,28 @@ fn preferBackslash(path: []const u8) bool {
     return is_windows or looksLikeWindowsAbs(path);
 }
 
+/// On Windows, WSL spells a drive as `/mnt/<letter>/...`: the same folder as
+/// `<letter>:\...`. Without this a WSL command's paths were all "outside".
+fn wslDrivePath(allocator: std.mem.Allocator, path: []const u8) Error!?[]u8 {
+    if (!is_windows) return null;
+    if (path.len < 6 or !startsWithIgnoreCase(path, "/mnt/") or !std.ascii.isAlphabetic(path[5])) return null;
+    if (path.len > 6 and path[6] != '/' and path[6] != '\\') return null;
+    const rest = if (path.len > 7) path[7..] else "";
+    const out = allocator.alloc(u8, 3 + rest.len) catch return error.OutOfMemory;
+    out[0] = path[5];
+    out[1] = ':';
+    out[2] = '\\';
+    @memcpy(out[3..], rest);
+    return out;
+}
+
 /// Slash-unify and collapse `.` / `..` lexically. Relative paths join `cwd`.
 pub fn normalizePathAlloc(allocator: std.mem.Allocator, path: []const u8, cwd: []const u8) Error![]u8 {
-    const cleaned = trimSpace(path);
-    if (cleaned.len == 0) return error.InvalidPath;
+    const given = trimSpace(path);
+    if (given.len == 0) return error.InvalidPath;
+    const mapped = try wslDrivePath(allocator, given);
+    defer if (mapped) |m| allocator.free(m);
+    const cleaned = mapped orelse given;
 
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
@@ -571,6 +589,39 @@ fn shellScript(allocator: std.mem.Allocator, argv: []const []const u8, owned: *b
     owned.* = false;
     if (argv.len < 2) return null;
     const head = executableBasename(argv[0]);
+    if (eqlIgnoreCase(head, "wsl")) {
+        // `wsl [options] bash -lc <script>`: the script is the shell's.
+        for (argv[1..], 1..) |arg, i| {
+            if (nameIn(executableBasename(arg), &posix_shells)) return shellScript(allocator, argv[i..], owned);
+        }
+        // `wsl [options] <command> <args>`: read the words as one command.
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(allocator);
+        var skip_value = false;
+        var started = false;
+        for (argv[1..]) |arg| {
+            if (!started) {
+                if (skip_value) {
+                    skip_value = false;
+                    continue;
+                }
+                if (arg.len > 0 and arg[0] == '-') {
+                    skip_value = wslOptionTakesValue(arg);
+                    continue;
+                }
+                started = true;
+            } else {
+                try buf.append(allocator, ' ');
+            }
+            try buf.appendSlice(allocator, arg);
+        }
+        if (!started) {
+            buf.deinit(allocator);
+            return null;
+        }
+        owned.* = true;
+        return .{ .text = try buf.toOwnedSlice(allocator), .posix = true, .single_quotes = true };
+    }
     if (nameIn(head, &posix_shells)) {
         var saw_c = false;
         for (argv[1..]) |arg| {
@@ -598,6 +649,12 @@ fn shellScript(allocator: std.mem.Allocator, argv: []const []const u8, owned: *b
         return .{ .text = try buf.toOwnedSlice(allocator), .posix = false, .single_quotes = is_ps };
     }
     return null;
+}
+
+/// The `wsl` options that are followed by a value.
+fn wslOptionTakesValue(arg: []const u8) bool {
+    const with_value = [_][]const u8{ "-d", "--distribution", "--distribution-id", "-u", "--user", "--cd", "--shell-type" };
+    return nameIn(arg, &with_value);
 }
 
 fn isCmdScriptSwitch(arg: []const u8) bool {
@@ -647,6 +704,9 @@ const ScriptState = struct {
     /// `-Command` has just been read.
     win_shell: WinShell = .none,
     win_script_next: bool = false,
+    /// `wsl` was read: its options are skipped and the command follows.
+    wsl_opts: bool = false,
+    wsl_skip_value: bool = false,
     cd_pending: bool = false,
     /// A `cd` left the roots (or went somewhere unknown): relative names no
     /// longer land inside them.
@@ -663,6 +723,8 @@ const ScriptState = struct {
         self.shell_c = false;
         self.win_shell = .none;
         self.win_script_next = false;
+        self.wsl_opts = false;
+        self.wsl_skip_value = false;
         self.cd_pending = false;
         self.redirect_next = false;
     }
@@ -675,6 +737,21 @@ const ScriptState = struct {
             return;
         }
         if (self.command_start) {
+            // `wsl cp a /mnt/c/x` went unread: wsl is not itself a write.
+            if (self.wsl_opts) {
+                if (self.wsl_skip_value) {
+                    self.wsl_skip_value = false;
+                    return;
+                }
+                if (raw.len > 0 and raw[0] == '-') {
+                    self.wsl_skip_value = wslOptionTakesValue(raw);
+                    return;
+                }
+                self.wsl_opts = false;
+            } else if (eqlIgnoreCase(executableBasename(raw), "wsl")) {
+                self.wsl_opts = true;
+                return;
+            }
             if (nameIn(executableBasename(raw), &command_prefixes) or isAssignment(raw)) return;
             // a switch of a prefix word (`nice -n 5`, `env -i`)
             if (raw.len > 0 and raw[0] == '-') return;
@@ -1054,6 +1131,44 @@ test "workdir jail reads a Windows shell nested inside a script" {
         &.{ "pwsh.exe", "-Command", "cmd /c \"copy a.txt C:\\focus\\proj\\b.txt\"" },
         &.{ "pwsh.exe", "-Command", "powershell -ExecutionPolicy Bypass -File build.ps1" },
         &.{ "pwsh.exe", "-Command", "cmd /c dir" },
+    };
+    for (allowed) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            std.debug.print("denied: {s}\n", .{argv[argv.len - 1]});
+            return err;
+        };
+    }
+}
+
+test "workdir jail reads commands run through wsl" {
+    if (!is_windows) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    try setRoots(allocator, &.{"C:\\focus\\proj"});
+    defer clearRoots(allocator);
+    const cwd = "C:\\focus\\proj";
+
+    const denied = [_][]const []const u8{
+        &.{ "C:\\Windows\\System32\\wsl.exe", "--cd", "/mnt/c/focus/proj", "-e", "bash", "-lc", "cp a /mnt/c/Windows/x" },
+        &.{ "wsl.exe", "-e", "bash", "-lc", "echo hi > /etc/x" },
+        &.{ "wsl.exe", "-d", "Ubuntu", "-e", "cp", "a", "/mnt/d/outside/x" },
+        &.{ "wsl.exe", "--cd", "/mnt/c/focus/proj", "-e", "bash", "-lc", "cd /mnt/c/Users && touch x" },
+        &.{ "pwsh.exe", "-Command", "wsl cp a /mnt/c/Windows/x" },
+        &.{ "pwsh.exe", "-Command", "wsl -d Ubuntu -- bash -c 'cp a /mnt/c/Windows/x'" },
+    };
+    for (denied) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            try std.testing.expectEqual(error.AccessDenied, err);
+            continue;
+        };
+        std.debug.print("not denied: {s}\n", .{argv[argv.len - 1]});
+        return error.TestExpectedError;
+    }
+
+    const allowed = [_][]const []const u8{
+        &.{ "wsl.exe", "--cd", "/mnt/c/focus/proj", "-e", "bash", "-lc", "pwd && echo hi > out.txt" },
+        &.{ "wsl.exe", "--cd", "/mnt/c/focus/proj", "-e", "bash", "-lc", "cp a /mnt/c/focus/proj/b" },
+        &.{ "wsl.exe", "-e", "ls", "/etc" },
+        &.{ "pwsh.exe", "-Command", "wsl make test" },
     };
     for (allowed) |argv| {
         checkSpawn(allocator, argv, cwd) catch |err| {

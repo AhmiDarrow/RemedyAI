@@ -44,20 +44,6 @@ var pbsPins = map[string]pbsPin{
 	},
 }
 
-// ensureManagedPython returns an absolute interpreter path, downloading the
-// pinned CPython into ~/.remedy/voice/runtime when nothing else is available.
-// Shares the voice managed runtime tree so voice packs and RMDY use one Python.
-func ensureManagedPython() (string, error) {
-	if abs := managedVoicePython(); abs != "" {
-		return abs, nil
-	}
-	home := remedyHomeForManagedPython()
-	if home == "" {
-		return "", fmt.Errorf("cannot resolve REMEDY_HOME for managed python")
-	}
-	return EnsureManagedPythonIn(filepath.Join(home, "voice", "runtime"))
-}
-
 // EnsureManagedPythonIn returns the pinned, checksum-verified CPython under
 // rdir, downloading it there when it is missing. For a component that needs
 // a Python of its own on a PC that has none.
@@ -108,17 +94,6 @@ func pbsPinForGOOS() (pbsPin, bool) {
 	key := runtime.GOOS + "/" + runtime.GOARCH
 	pin, ok := pbsPins[key]
 	return pin, ok
-}
-
-func remedyHomeForManagedPython() string {
-	if h := strings.TrimSpace(os.Getenv("REMEDY_HOME")); h != "" {
-		return h
-	}
-	uh, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(uh) == "" {
-		return ""
-	}
-	return filepath.Join(uh, ".remedy")
 }
 
 func managedPythonBinary(runtimeDir string) string {
