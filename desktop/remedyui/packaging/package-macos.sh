@@ -80,7 +80,7 @@ fi
 install -m 0755 "${CORE}" "${APP}/Contents/MacOS/libremedy_core.dylib"
 ICON_FILE="icon.png"
 cp -f "${ROOT}/assets/icon.png" "${APP}/Contents/Resources/icon.png"
-ICNS="${ROOT}/../src-tauri/icons/icon.icns"
+ICNS="${ROOT}/assets/icons/icon.icns"
 if [[ -f "${ICNS}" ]]; then
   cp -f "${ICNS}" "${APP}/Contents/Resources/icon.icns"
   ICON_FILE="icon.icns"

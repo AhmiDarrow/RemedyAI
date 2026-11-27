@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 // Project folder, access scope and the workspace block (core/workspace.py,
@@ -173,11 +175,8 @@ func allowedRoots(scope, projectRoot string, env Env) []string {
 	scope = normalizeAccessScope(scope)
 	uh := resolvePath(env.UserHome, env.UserHome)
 	if scope != "untrusted" && scope != "workspace" {
-		for _, name := range []string{"Desktop", "Documents", "Downloads"} {
-			p := filepath.Join(uh, name)
-			if st, err := os.Stat(p); err == nil && st.IsDir() {
-				add(resolvePath(p, env.UserHome))
-			}
+		for _, p := range sysres.UserFolders(uh) {
+			add(resolvePath(p, env.UserHome))
 		}
 	}
 	if scope == "home" || scope == "full" {

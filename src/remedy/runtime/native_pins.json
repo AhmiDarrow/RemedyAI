@@ -1,5 +1,0 @@
-{
-  "_note": "Unpinned in the source tree. scripts/pin_native_hashes.py fills this from the release build artifacts before the PyPI wheel is built.",
-  "version": "",
-  "sha256": {}
-}

@@ -91,11 +91,7 @@ _FAKE_HINT = re.compile(
 
 _SKIP_SECRET_SCAN_GLOBS = (
     # Pattern catalogs and redactors deliberately embed secret-shaped samples.
-    "src/remedy/core/metabolism/redact.py",
-    "src/remedy/core/provider_sanitize.py",
-    "src/remedy/core/self_inject_guard.py",
     "scripts/check_sanitize.py",
-    "scripts/self_improve_security_scan.py",
     "tests/",
     "native/go/secret/",
 )
@@ -249,7 +245,7 @@ def check_forbidden_paths(tracked: list[str], errors: list[str]) -> None:
             continue
         # Accidental sidecars / installers in the source tree.
         if path.endswith((".exe", ".dll", ".so", ".dylib")) and not path.startswith(
-            ("desktop/bin/", "desktop/src-tauri/", "native/zig/", "android/")
+            ("desktop/bin/", "desktop/src-tauri/", "native/zig/")
         ):
             # Allow listed build outputs only under those trees; nothing under src/ or scripts/.
             if path.startswith(("src/", "scripts/", "tests/", "docs/", "native/go/cmd/")):

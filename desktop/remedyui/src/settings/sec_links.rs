@@ -745,11 +745,12 @@ fn mcp(ui: &Ui, s: Settings) -> El {
                 ui,
                 "Run Remedy as an MCP server so other tools on this machine can use skills and plans. Same owner, local only.",
             ))
-            .child(w::text(ui, "remedy mcp serve\n# or: remedy-mcp").variant("code"))
+            .child(w::text(ui, "remedy-runtime mcp serve").variant("code"))
+            .child(form::hint(ui, "remedy-runtime is in the folder Remedy Desktop is installed in. Give its full path if that folder is not on your PATH."))
             .child(form::label(ui, "MCP client JSON"))
             .child(w::text(
                 ui,
-                "{\n  \"mcpServers\": {\n    \"remedy\": {\n      \"command\": \"remedy-mcp\",\n      \"args\": []\n    }\n  }\n}",
+                "{\n  \"mcpServers\": {\n    \"remedy\": {\n      \"command\": \"remedy-runtime\",\n      \"args\": [\"mcp\", \"serve\"]\n    }\n  }\n}",
             ).variant("code"))
             .child(form::hint(ui, "The command and JSON are shown here. This shell has no separate clipboard control."))
             .child(form::hint(ui, "Tools: skill list, search, and get; plan list and show. Script run stays opt-in."))

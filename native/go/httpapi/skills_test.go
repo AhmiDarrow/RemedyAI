@@ -89,6 +89,22 @@ func doSkillsReq(t *testing.T, s *Server, method, path string, body string) (int
 	return rr.Code, rr.Body.Bytes()
 }
 
+// shippedSkillCount is how many skills are compiled into the runtime.
+func shippedSkillCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir(embeddedSkillsRoot(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
+}
+
 func TestListAndGetSkills(t *testing.T) {
 	s, _ := newSkillsTestServer(t)
 
@@ -100,18 +116,25 @@ func TestListAndGetSkills(t *testing.T) {
 	if err := json.Unmarshal(raw, &list); err != nil {
 		t.Fatalf("list json: %v (%s)", err, raw)
 	}
-	if len(list) != 1 {
-		t.Fatalf("len=%d want 1; body=%s", len(list), raw)
+	// The home's own skill, beside the ones that ship inside the runtime.
+	if want := 1 + shippedSkillCount(t); len(list) != want {
+		t.Fatalf("len=%d want %d", len(list), want)
 	}
-	if list[0]["name"] != "demo-skill" {
-		t.Fatalf("name=%v", list[0]["name"])
+	var demo map[string]any
+	for _, row := range list {
+		if row["name"] == "demo-skill" {
+			demo = row
+		}
 	}
-	if list[0]["status"] != "active" {
-		t.Fatalf("status=%v want active", list[0]["status"])
+	if demo == nil {
+		t.Fatalf("demo-skill is not listed among %d skills", len(list))
 	}
-	tags, _ := list[0]["tags"].([]any)
+	if demo["status"] != "active" {
+		t.Fatalf("status=%v want active", demo["status"])
+	}
+	tags, _ := demo["tags"].([]any)
 	if len(tags) != 2 {
-		t.Fatalf("tags=%v", list[0]["tags"])
+		t.Fatalf("tags=%v", demo["tags"])
 	}
 
 	code, raw = doSkillsReq(t, s, http.MethodGet, "/api/skills?q=demo", "")
@@ -162,8 +185,8 @@ func TestStatusSkillsCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, _ := body["skills_count"].(float64)
-	if int(n) != 1 {
-		t.Fatalf("skills_count=%v want 1; body=%v", body["skills_count"], body)
+	if want := 1 + shippedSkillCount(t); int(n) != want {
+		t.Fatalf("skills_count=%v want %d", body["skills_count"], want)
 	}
 }
 

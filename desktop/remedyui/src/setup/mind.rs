@@ -23,6 +23,11 @@ pub struct Mind {
     pub traditional: Signal<bool>,
     pub ready: Signal<bool>,
     pub client: Signal<Option<Client>>,
+    /// The owner said yes to the download. Nothing is fetched before that.
+    pub asked: Signal<bool>,
+    /// The download's size as the runtime reports it, for the question.
+    pub size: Signal<String>,
+    allow: Arc<std::sync::atomic::AtomicBool>,
     generation: Arc<AtomicU64>,
 }
 
@@ -40,11 +45,20 @@ impl Mind {
             traditional: Signal::new(false),
             ready: Signal::new(false),
             client: Signal::new(client),
+            asked: Signal::new(false),
+            size: Signal::new(String::new()),
+            allow: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// Poll only when a client exists. Previews stay on "preparing".
+    /// The owner's yes: the download may start.
+    pub fn allow_download(&self) {
+        self.allow.store(true, Ordering::SeqCst);
+        self.asked.set(true);
+    }
+
     pub fn kick(&self) {
         let Some(client) = self.client.get() else {
             return;
@@ -56,6 +70,9 @@ impl Mind {
         let bytes = self.bytes.clone();
         let error = self.error.clone();
         let ready = self.ready.clone();
+        let allow = self.allow.clone();
+        let size = self.size.clone();
+        let asked = self.asked.clone();
         let Ok(waker) = remedy_ui::reactive::waker() else {
             return;
         };
@@ -139,7 +156,24 @@ impl Mind {
                         model::mind_failure_message(reason, detail)
                     });
                     let progress_error2 = progress_error.clone();
+                    let need = status
+                        .as_ref()
+                        .and_then(|v| {
+                            v.pointer("/model/approx_download_bytes")
+                                .or_else(|| v.pointer("/approx_download_bytes"))
+                        })
+                        .and_then(|n| n.as_f64())
+                        .filter(|n| *n > 0.0)
+                        .map(|n| format!("{:.1} GB", n / 1_073_741_824.0))
+                        .unwrap_or_default();
+                    let size2 = size.clone();
+                    let asked2 = asked.clone();
                     let _ = waker.post(move || {
+                        size2.set_if_changed(need);
+                        // A download already under way, or a model already here, needs no question.
+                        if downloading || installed {
+                            asked2.set_if_changed(true);
+                        }
                         phase2.set(phase_for_ui);
                         percent2.set(pct);
                         bytes2.set(bytes_label);
@@ -156,7 +190,7 @@ impl Mind {
                     if finished {
                         break;
                     }
-                    if !installed && !downloading && progress_error.is_empty() {
+                    if !installed && !downloading && progress_error.is_empty() && allow.load(Ordering::SeqCst) {
                         let _ = super::api::vision_install(&client);
                     }
                     std::thread::sleep(Duration::from_millis(1500));
@@ -195,12 +229,31 @@ pub fn mind_view(ui: &Ui, mind: Mind) -> El {
         .child(chrome::sub(ui, MIND_SUBTITLE));
     let bar = w::progress(ui, "Mind download progress", mind.percent.clone());
     let status = w::text(ui, "").variant("muted").text(move || label2.get());
+    let progress = w::column(ui)
+        .gap(unit)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(bar)
+        .child(status);
     let root = chrome::stack(
         ui,
         vec![
             head,
-            bar,
-            status,
+            chrome::when(
+                ui,
+                {
+                    let asked = mind.asked.clone();
+                    move || !asked.get()
+                },
+                {
+                    let mind = mind.clone();
+                    let ui_ask = ui.clone();
+                    move || ask_block(&ui_ask, mind.clone())
+                },
+            ),
+            crate::settings::visible_when(progress, {
+                let asked = mind.asked.clone();
+                move || asked.get()
+            }),
             chrome::when(
                 ui,
                 {
@@ -235,6 +288,30 @@ pub fn mind_view(ui: &Ui, mind: Mind) -> El {
         let _ = &root2;
     });
     chrome::center(ui, root, 520.0)
+}
+
+/// Nothing is downloaded until the owner says so here.
+fn ask_block(ui: &Ui, mind: Mind) -> El {
+    let unit = ui.theme().spacing.unit;
+    w::column(ui)
+        .gap(unit)
+        .child(w::text(ui, "").variant("muted").text({
+            let size = mind.size.clone();
+            move || {
+                let size = size.get();
+                let amount = if size.is_empty() { "a large download".to_string() } else { format!("a {size} download") };
+                format!(
+                    "Her mind is a model that runs on this computer. It is {amount} from Hugging Face and GitHub. Nothing is fetched until you say so."
+                )
+            }
+        }))
+        .child(chrome::actions(
+            ui,
+            vec![chrome::primary(ui, "Download", {
+                let mind = mind.clone();
+                move || mind.allow_download()
+            })],
+        ))
 }
 
 fn error_block(ui: &Ui, mind: Mind) -> El {

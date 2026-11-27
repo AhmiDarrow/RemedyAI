@@ -20,7 +20,7 @@ pub(crate) use actions::{
     load_memory, load_more_memory, load_skills, move_project_order, move_session_order, on_session_created, open_skill, pick_attachments,
     apply_picked_project_path, pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
-    rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
+    rename_session, request_plan_changes, resolve_approval, more_library, save_skill, search_library,
     search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
     trust_skill, visible_approval,
 };
@@ -233,7 +233,6 @@ pub struct Depth {
     pub drag_over: Signal<bool>,
     pub notice: Signal<String>,
     pub commands: Signal<Vec<SlashCommand>>,
-    pub agents: Signal<Vec<String>>,
     pub prompt_history: Signal<Vec<String>>,
     pub project_order: Signal<Vec<String>>,
     pub session_order: Signal<Vec<(String, Vec<String>)>>,
@@ -287,6 +286,10 @@ pub struct Depth {
     pub skill_name: Signal<String>,
     pub skill_body: Signal<String>,
     pub library_rows: Signal<Vec<SkillRow>>,
+    /// The search the rows answer, and how many skills match it in all. The rows are
+    /// one page or more of that; the rest is fetched when asked for.
+    pub library_query: Signal<String>,
+    pub library_total: Signal<usize>,
     pub trace_open: Signal<bool>,
     pub suggest_gen: Signal<u64>,
     /// A composer send waiting for a sidecar session to be created.
@@ -322,7 +325,6 @@ impl Depth {
             drag_over: Signal::new(false),
             notice: Signal::new(String::new()),
             commands: Signal::new(logic::fallback_commands()),
-            agents: Signal::new(Vec::new()),
             prompt_history: Signal::new(history),
             project_order: Signal::new(projects),
             session_order: Signal::new(sessions),
@@ -373,6 +375,8 @@ impl Depth {
             skill_name: Signal::new(String::new()),
             skill_body: Signal::new(String::new()),
             library_rows: Signal::new(Vec::new()),
+            library_query: Signal::new(String::new()),
+            library_total: Signal::new(0),
             trace_open: Signal::new(false),
             suggest_gen: Signal::new(0),
             held_for_session: Signal::new(None),

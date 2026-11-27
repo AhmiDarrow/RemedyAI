@@ -665,3 +665,33 @@ func TestOpenAICompatRetriesRateLimitsButNotBadKeys(t *testing.T) {
 		t.Fatalf("a 401 is final: err=%v tries=%d", err, denied)
 	}
 }
+
+// Providers on this adapter count cached input inside prompt_tokens and name
+// it in different fields. It is reported apart, so PromptTokens is the input
+// paid at the full rate.
+func TestSSEUsageSplitsCachedInput(t *testing.T) {
+	for name, raw := range map[string]string{
+		"details":  `{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,"prompt_tokens_details":{"cached_tokens":800}}`,
+		"deepseek": `{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,"prompt_cache_hit_tokens":800}`,
+		"flat":     `{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,"cached_tokens":800}`,
+	} {
+		var u sseUsage
+		if err := json.Unmarshal([]byte(raw), &u); err != nil {
+			t.Fatal(err)
+		}
+		if got := u.cached(); got != 800 {
+			t.Fatalf("%s: cached=%d", name, got)
+		}
+	}
+	// No cache field, or a figure larger than the prompt: nothing is claimed.
+	for _, raw := range []string{
+		`{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}`,
+		`{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15,"cached_tokens":999}`,
+	} {
+		var u sseUsage
+		_ = json.Unmarshal([]byte(raw), &u)
+		if got := u.cached(); got != 0 {
+			t.Fatalf("%s: cached=%d", raw, got)
+		}
+	}
+}

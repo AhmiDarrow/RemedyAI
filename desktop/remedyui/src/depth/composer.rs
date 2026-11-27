@@ -585,22 +585,6 @@ fn current_offers(studio: &Studio, caret: usize, files: &[String], menu_on: bool
         return Vec::new();
     };
     let mut out = Vec::new();
-    if !q.is_empty() {
-        let ql = q.to_lowercase();
-        for name in studio.depth.agents.get() {
-            if out.len() >= 4 {
-                break;
-            }
-            if name.to_lowercase().contains(&ql) {
-                out.push(Offer {
-                    insert: format!("@{name} "),
-                    label: format!("@{name}"),
-                    detail: String::new(),
-                    at: Some(token_at(&text, caret)),
-                });
-            }
-        }
-    }
     if q.len() >= 2 {
         for name in files.iter().take(6) {
             out.push(Offer {

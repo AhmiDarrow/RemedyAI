@@ -75,25 +75,6 @@ export interface VisionStatus {
   }
 }
 
-export interface NanoSwarmStatus {
-  name?: string
-  active?: boolean
-  event_count?: number
-  last_event?: string | null
-  local_model_id?: string
-  roles?: string[]
-  bots?: Record<string, Record<string, unknown>>
-  bundle?: {
-    model_present?: boolean
-    model_path?: string | null
-    bundle_root?: string | null
-  }
-  catalog?: {
-    default_model_id?: string
-    roles?: string[]
-    bundle_policy?: string
-  }
-}
 
 export async function getVisionStatus(opts?: {
   full?: boolean
@@ -168,10 +149,6 @@ export async function startVisionServer(): Promise<{ ok?: boolean; error?: strin
 
 export async function stopVisionServer(): Promise<{ ok?: boolean }> {
   return apiFetch('/vision/stop', { method: 'POST', body: '{}' })
-}
-
-export async function getNanoSwarmStatus(): Promise<NanoSwarmStatus> {
-  return apiFetch<NanoSwarmStatus>('/nanoswarm/status')
 }
 
 /**

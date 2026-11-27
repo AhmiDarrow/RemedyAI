@@ -19,19 +19,10 @@ A bar with numbers behind it, not a judgement:
 | Talks over you | under 3% of turns |
 | Silence you are left in | under 800 ms |
 
-Two scripted calls are measured against it — a clinic receptionist who
-interrupts, and an automated menu with unforgiving timing. Both pass.
-
-```bash
-python -m remedy.telephony.bench          # run them
-python -m remedy.telephony.bench --json   # machine-readable
-```
-
-Read the result honestly: the transport, turn-taking and interruption handling
-are the real implementation. Speech recognition, the model, and the voice are
-stubs that *wait* their declared time rather than compute. Phase 0 proves the
-timing architecture, which is what fails first. It says nothing about whether
-the voice sounds human to an ear.
+Two scripted calls were designed to be measured against it — a clinic
+receptionist who interrupts, and an automated menu with unforgiving timing.
+There is no command in this build that runs them. These numbers are the target,
+not a measured result.
 
 ## Four ways to get a line — your choice, not ours
 
@@ -59,7 +50,7 @@ size before downloading:
 |---|---|--:|
 | baresip | the SIP engine | ~6 MB, BSD-3 |
 | smart-turn | knowing when you have finished speaking | ~9 MB, BSD-2 |
-| Chatterbox | a voice that does not sound synthetic (Grove HQ + phone) | ~1.1 GB, MIT |
+| Pocket TTS (sherpa-onnx) | the high-quality voice (Grove HQ + phone) | ~100 MB |
 | Android image | running a calling app here | ~2.6 GB, its publisher's terms |
 
 ## Before any real call

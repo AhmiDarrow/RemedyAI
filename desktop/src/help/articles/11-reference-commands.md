@@ -5,41 +5,67 @@ Type `/` in the composer for autocomplete. Commands also work via
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `/help` | | Command card + tip to open full Help (**F1**) |
+| `/help` | `command?` | Command card, or help for one command |
+| `/house-rules` | `/houserules` | Read the house rules you set |
+| `/commands` | | Every command, grouped |
 | `/new` | | New chat session |
 | `/reset` | alias `/clear` | **Full reset** of this session (history, plans, brief, goals buffer, checkpoints, attachments). Same tab — does not open another. Durable `/remember` memory kept. |
 | `/sessions` | | List recent sessions |
-| `/models` | | Model picker guidance |
-| `/thinking` | | Toggle thinking visibility |
-| `/memory` | `query` | Search durable memory |
-| `/remember` | `text` | Save a durable fact |
-| `/forget` | `text` | Remove a matching Partner Memory fact |
-| `/pin` | `text` | Pin a fact so it always injects |
-| `/whoami` | | Profile / known facts + this-home census |
-| `/house-rules` | `revisit` | Show house rules, or go over them again |
-| `/stretch` | alias `/home` | Re-map this PC (hardware, tools, rooms, local ports) |
-| `/goals` | | List life goals and the next action |
-| `/goal` | `title` | Hold a life goal; takes one local step (Documents/Remedy Life) |
-| `/plans` | | List structured task plans |
-| `/plan` | `approve` · `new <title>` · (empty = show latest) | Show / create / approve a plan |
-| `/compact` | `focus?` | Memory Harness compress → Session Brief |
-| `/harness` | | Show Session Brief / stats |
-| `/approve` | `id?` | Approve pending high-impact action |
-| `/deny` | `id?` | Deny pending action |
-| `/import` | `path` | Import folder of notes into memory |
-| `/export` | | Export this session as `.txt` (desktop) |
-| `/helper` | `topic` · `error <text>` · alias `/tip` | Offline help tips from the Helper worker |
-| `/import-session` | `path?` | Import session from `.txt`/`.md` |
+| `/model` | `name?` · aliases `/models`, `/m` | Show this conversation's model, list the others, or switch |
+| `/memory` | `query` | Search memory |
 | `/skills` | | List available skills |
-| `/handoff` | | List handoff notes |
-| `/security-status` | | Show partner control settings |
-| `/init` | `path?` | Project scan helpers / AGENTS.md |
+| `/export` | | Export this session as `.txt` (desktop) |
+| `/whoami` | | Show what Remedy knows about you |
+| `/goals` | | List open goals |
+| `/plans` | | List structured task plans |
+| `/security-status` | aliases `/security`, `/secstatus` | Show partner control settings |
+| `/stop` | alias `/abort` | Stop the reply being written |
+| `/status` | | What this conversation is on and whether Remedy is working |
+| `/think` | `off`·`low`·`medium`·`high` · alias `/thinking` | Show or set how much she thinks before answering |
+| `/search` | `words` · alias `/find` | Find earlier conversations by what was said |
+| `/rename` | `title` | Give this conversation a title |
+| `/remember` | `text` | Save a fact to memory |
+| `/forget` | `text` | Remove something from memory |
+| `/goal` | `title` | Add a goal |
+| `/plan` | `approve` · `cancel` · (empty = show latest) | Show the latest plan, approve it or cancel it |
+| `/approve` | `id?` · alias `/yes` | Say yes to what Remedy is waiting to do |
+| `/deny` | `id?` · alias `/no` | Say no to what Remedy is waiting to do |
+| `/harness` | | Show this session's context figures |
+| `/settings` | `filter?` · alias `/config` | List settings and their values |
+| `/set` | `name value` | Change a setting (names from `/settings`) |
+| `/get` | `name` | Show one setting |
+| `/theme` | `name?` | Show or set the look |
+| `/name` | `name?` | What she calls you |
+| `/partner` | `name?` | Her name |
+| `/persona` | `style?` | How she talks |
+| `/language` | `code?` · alias `/lang` | The language of the menus |
+| `/web` | `on`·`off` | Let her search and read the web |
+| `/privacy` | `on`·`off` | Privacy mode |
+| `/approvals` | `ask`·`auto`·`full` · alias `/mode` | When she asks before acting |
+| `/scope` | `project`·`workspace`·`full` | Which folders her tools may use |
+| `/effort` | `level?` | Reasoning effort, for models that take one |
+| `/learning` | `on`·`off` | Let her write new skills from what works |
+| `/vigil` | `on`·`off` | Night work while you are away |
+| `/safeguards` | alias `/guards` | The four safeguards and their values |
+| `/usage` | `days?` · alias `/cost` | Tokens used by each model round |
+| `/context` | | How full this conversation's context is |
+| `/providers` | | Model providers and which are connected |
+| `/tools` | `filter?` | The tools she can use |
+| `/todos` | | Her checklist in this conversation |
+| `/routines` | | Her standing routines and when they next run |
+| `/jobs` | alias `/children` | Background jobs she has running |
+| `/notifications` | alias `/inbox` | What she left for you while you were away |
+| `/connect` | `pause`·`resume` · alias `/phone` | Phone access |
+| `/voice` | | Speaking and listening: what is installed and switched on |
+| `/doctor` | alias `/diagnostics` | A health check of Remedy and this PC |
+| `/version` | | The version that is running |
+| `/update` | alias `/updates` | Check whether a newer version is out |
 
 ## Tips
 
 - Prefer **F1** for the full owner’s manual; `/help` is the quick card.  
 - Prefer natural language (“I prefer TypeScript”); `/remember` pins hard; `/forget` fixes mistakes.  
-- `/compact` before huge pastes or long tool traces.  
+- `/commands` lists every command, grouped. Commands also work in Grove and on a paired phone.
 
 ## Related
 

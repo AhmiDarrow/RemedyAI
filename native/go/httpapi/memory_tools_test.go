@@ -345,3 +345,31 @@ func TestMemorySkillToolsAreGoAndRegisteredOnce(t *testing.T) {
 		}
 	}
 }
+
+// /forget has to reach the facts shown to the model on every turn, not only
+// the notes.
+func TestForgetProfileFactsRemovesWhatIsInjected(t *testing.T) {
+	e := newMemToolEnv(t)
+	for _, text := range []string{"The owner prefers espresso in the morning", "The owner deploys from a lab box"} {
+		if _, err := e.s.sessions.upsertProfileFact("default", profileFactWrite{
+			Text: text, Source: "explicit", Authority: "owner", Confidence: 0.9, Force: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	found, err := e.s.sessions.matchProfileFacts("default", "ESPRESSO")
+	if err != nil || len(found) != 1 {
+		t.Fatalf("match: %v %v", found, err)
+	}
+	removed, err := e.s.sessions.forgetProfileFacts("default", "espresso")
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("forget: %v %v", removed, err)
+	}
+	left, _ := e.s.sessions.matchProfileFacts("default", "owner")
+	if len(left) != 1 || !strings.Contains(left[0], "lab box") {
+		t.Fatalf("the other fact must stay: %v", left)
+	}
+	if again, _ := e.s.sessions.forgetProfileFacts("default", "espresso"); len(again) != 0 {
+		t.Fatalf("forgetting twice removed %v", again)
+	}
+}

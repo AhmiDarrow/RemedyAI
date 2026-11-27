@@ -74,11 +74,13 @@ fi
 SIG="${FILE}.sig"
 NAME="$(basename "${FILE}")"
 set +e
-if [[ -z "${PASS}" ]]; then
-  minisign -W -S -s "${KEY}" -m "${FILE}" -x "${SIG}" -c "Remedy Desktop update" -t "${NAME}"
-  CODE=$?
-else
-  printf '%s\n' "${PASS}" | minisign -S -s "${KEY}" -m "${FILE}" -x "${SIG}" -c "Remedy Desktop update" -t "${NAME}"
+# The password goes in on stdin, also when it is empty: a key made with an empty
+# password is still an encrypted key, and minisign asks for it. Only a key written
+# with no encryption at all takes -W, which is tried when the first way fails.
+printf '%s\n' "${PASS}" | minisign -S -s "${KEY}" -m "${FILE}" -x "${SIG}" -c "Remedy Desktop update" -t "${NAME}"
+CODE=$?
+if [[ ( "${CODE}" -ne 0 || ! -f "${SIG}" ) && -z "${PASS}" ]]; then
+  minisign -W -S -s "${KEY}" -m "${FILE}" -x "${SIG}" -c "Remedy Desktop update" -t "${NAME}" </dev/null
   CODE=$?
 fi
 set -e

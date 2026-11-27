@@ -165,8 +165,34 @@ func TestReplayRecordedPython(t *testing.T) {
 				Apply:       func(patch map[string]any) error { merge(cfg, patch); return nil },
 				StoreSecret: func(provider, key string) error { return nil },
 			}
+			// HOUSERULES_UPDATE=1 records what the tool returns now, after a
+			// deliberate change of behaviour. Read the diff before committing it.
+			update := os.Getenv("HOUSERULES_UPDATE") != ""
+			if update {
+				defer func() {
+					out, _ := json.MarshalIndent(rc, "", " ")
+					_ = os.WriteFile(p, append(out, '\n'), 0o644)
+				}()
+			}
 			for i, st := range rc.Steps {
 				got, _ := Dispatch(env, st.Input)
+				if update {
+					rc.Steps[i].Result, _ = mask(got, home).(map[string]any)
+					for name := range st.Files {
+						var have any
+						if name == "config.toml" {
+							if len(cfg) > 0 {
+								have = cfg
+							}
+						} else {
+							have = readFile(t, home, name)
+						}
+						raw, _ := json.Marshal(mask(have, home))
+						rc.Steps[i].Files[name] = raw
+					}
+					total++
+					continue
+				}
 				if g, w := mask(got, home), mask(st.Result, home); !reflect.DeepEqual(g, w) {
 					t.Fatalf("step %d %s %v: result differs\n got  %s\n want %s", i, st.Tool, st.Input, js(g), js(w))
 				}

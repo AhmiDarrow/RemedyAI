@@ -91,4 +91,4 @@ See [Security & data](04-security-and-data).
 
 ## Related
 
-- [Security & data](04-security-and-data) · [Continuity workers](17-nanoswarm) · [Free providers](15-free-providers)
+- [Security & data](04-security-and-data) · [Context harness](17-nanoswarm) · [Free providers](15-free-providers)

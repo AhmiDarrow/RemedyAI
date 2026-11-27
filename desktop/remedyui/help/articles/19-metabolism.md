@@ -16,7 +16,7 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 | **Machine map** | Live browser URL, work roots, windows, file touches |
 | **Shadow rehearsal** | Dry-run high-blast tools before commit (on top of write jail) |
 | **Action IR** | Redacted replay traces under `~/.remedy/action_ir/` |
-| **Spread muscle** | Partitionable work prefers `spread_run` (one merged answer) |
+| **Spread muscle** | Partitionable work is surveyed in one parallel batch of tool calls |
 | **Time Crystal** | turn → session → project week → life; secrets never promote |
 | **Skill genome** | Local success ranks for skills (protected after multi-win) |
 | **CUA macros** | Successful computer-use chains become reusable hints |
@@ -27,8 +27,7 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 ## Operator surfaces
 
 - Chat: `/harness` (includes **Metabolism** line when counters exist)
-- API: `GET /api/partner/metabolism`
-- Partner status: `metabolism` field, plus `learn_log` (recent background learning runs)
+- Partner status: `GET /api/partner/status` — `metabolism` field, plus `learn_log` (recent background learning runs)
 - Export: `POST /api/partner/identity/export` `{ "passphrase": "…" }`
 - Import: `POST /api/partner/identity/import` `{ "passphrase": "…", "source": "…" }`
 
@@ -64,7 +63,7 @@ On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
 - **Soul and residue caps.** The unattended tick runs a compaction pass that enforces size caps on the soul field, residue dumps, and the vigil journal, so learning every turn cannot bloat later prompts. Injects stay after the cache-stable turn-context marker.
 - **Learning log.** Each background run (`after_tool_batch`, `turn_end`, `improve`) writes a local line under `learn_log.jsonl` in the home directory: what ran, what changed, how long it took, and whether it timed out or errored. The file is size-capped. Recent rows appear on `GET /api/partner/status` as `learn_log`.
 - **Vigil.** Still off until the owner accepts the one-time offer (after about 12 turns together). The hearth already ticks `partner.pulse`; a disabled vigil is a no-op.
-- **Voice.** Daily voice drift starts when the Python worker comes up (local JSON only). Set `REMEDY_NO_VOICE_EVOLUTION=1` to skip.
+- **Voice.** Her voice drifts a little each day, following her mood and your rapport (local only). The knob `voice_drift_from_affect` controls this.
 
 ## Related
 
@@ -74,5 +73,5 @@ On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
 - **More alive (opt-in messaging).** Internal drives (curiosity, social, competence, rest) drift slowly on the hearth tick and pick an idle action (dream, skills, rest, or a gentle offer). Dreams consolidate the day's moments into compact beliefs and a short autobiography, injected after the cache-stable marker (default 400 characters). Affect, shaped by recent outcomes and rapport, lightly colors tone and steers daily voice drift. Suggestion outcomes (accepted, fix held, unhappy) feed the skill genome. A weekly self-reflection may write a proposed self-change; it never applies without explicit approval. Proactive reach-out is **off by default** and, when enabled, arms at most one rate-limited check-in. All of this is under Settings → Advanced (`drives_enabled`, `proactive_reach_out`, `autobiography_chars`, `weekly_reflection`, and related knobs). The decoded state is on `GET /api/partner/status` as `alive`.
 - **Inner language.** Remedy speaks a self-evolving inner language on inner and worker channels (not in user-facing replies). We ship a seed envelope (`ril1`); she coins compact terms during dreams and reflection, each with a required plain-language gloss. Every message is written to an audit log in dense and decoded form. The lexicon, its lineage, and the log are on `GET /api/partner/status` as `inner_language`. See `docs/INNER_LANGUAGE.md`.
 - **Advanced knobs.** Every organism and token-budget tunable lives under `[advanced]` in `config.toml` (Settings → Advanced, hidden in simple mode). Current values stay the defaults. `REMEDY_NO_VOICE_EVOLUTION` and `REMEDY_REACT_MAX_RESULT_CHARS` still work and map onto these keys.
-- [Nanoswarm](17-nanoswarm)  
+- [Context harness](17-nanoswarm)  
 - [Computer use soak](computer-use-soak)  

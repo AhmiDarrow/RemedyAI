@@ -8,7 +8,7 @@ import {
 } from './client'
 import { pumpTurnStream, SeqGate } from './turnStream'
 import type { TurnStreamHandlers } from './turnStream'
-import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
+import type { ChatMessage, ModelDefinition, CommandDefinition } from '../types'
 
 export type { TurnStreamHandlers } from './turnStream'
 
@@ -430,9 +430,6 @@ export async function listModels(): Promise<{
   return apiFetch('/models')
 }
 
-export async function listAgents(): Promise<{ agents: AgentDefinition[] }> {
-  return apiFetch('/agents')
-}
 
 export async function listCommands(): Promise<{ commands: CommandDefinition[] }> {
   return apiFetch('/commands')

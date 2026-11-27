@@ -1,9 +1,9 @@
-# RemedyUI desktop packages for the 1.0.0 shell.
+# RemedyUI desktop packages, built on request.
 #
-# workflow_dispatch only. Uploads artifacts. Does not create a tag and does
-# not publish a GitHub Release. The owner cuts the 1.0.0 tag and latest.json.
-# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not add a
-# release-publishing action to this file. The owner publishes the 1.0.0 assets.
+# workflow_dispatch only. A quick way to check that the packages build and
+# sign on every platform without a tag: it uploads artifacts and nothing else.
+# The tag build is desktop-release.yml, which runs the same packaging scripts;
+# releases are published from the owner's PC (scripts/release_local.py).
 
 name: RemedyUI desktop package
 
@@ -51,11 +51,17 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
+          # Chocolatey does not put makensis on the path of later steps.
+          $nsis = "${env:ProgramFiles(x86)}\NSIS"
+          if (-not (Test-Path (Join-Path $nsis "makensis.exe"))) { throw "makensis.exe is not in $nsis" }
+          Add-Content -Path $env:GITHUB_PATH -Value $nsis
+          Add-Content -Path $env:GITHUB_ENV -Value "NSISDIR=$nsis"
           $zip = Join-Path $env:RUNNER_TEMP "minisign.zip"
           Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
           $dest = Join-Path $env:RUNNER_TEMP "minisign"
           Expand-Archive $zip -DestinationPath $dest
-          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Select-Object -First 1
+          # The archive holds one build per CPU; the runner is x64.
+          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1
           if (-not $exe) { throw "minisign.exe was not in the 0.12 archive" }
           $dir = $exe.DirectoryName
           Add-Content -Path $env:GITHUB_PATH -Value $dir
@@ -165,14 +171,11 @@ jobs:
         with:
           version: 0.16.0
 
+      # Homebrew builds for the runner's own CPU; the release archive is Apple silicon only.
       - name: Install minisign
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/minisign.zip \
-            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
-          unzip -q /tmp/minisign.zip -d /tmp/minisign
-          BIN="$(find /tmp/minisign -type f -name minisign | head -n 1)"
-          sudo install -m 0755 "${BIN}" /usr/local/bin/minisign
+          brew install minisign
           command -v minisign
 
       - name: Package

@@ -76,7 +76,7 @@ puts the file on the composer rail so you can point things out to Remedy.
 - **Auto-title** — from the first prompt
 - **Rename / pin / search / tags** — session sidebar features
 - **Export** — sidebar **Session options**, `/export`, or command palette → `.txt`
-- **Import** — sidebar **Session options**, `/import-session`, or palette → `.txt` / `.md`
+- **Import** — sidebar **Session options** or palette → `.txt` / `.md`
 
 ## Three-frame workspace
 

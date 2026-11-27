@@ -70,14 +70,14 @@ log_level = "INFO"
 # Optional tone flag (Settings → Advanced); default off
 sarcasm_mode = false
 
-# Claimidx (Settings → Privacy); default on. Set false to stop the local
-# Claimidx host and all ledger submits.
-claimidx_enabled = true
+# Claimidx (Settings → Privacy). Set true to install and run the local
+# Claimidx host (downloaded from PyPI), false to stop it. Left unset, a host
+# that is already installed keeps running and nothing new is downloaded.
+# claimidx_enabled = false
 
-# Claimidx public ledger submits (Settings → Advanced); default on when Claimidx
-# itself is on — Claimidx 0.7+ submits by default. Set false only for a fully
-# local Claimidx home.
-claimidx_public_ledger = true
+# Claimidx public ledger submits (Settings → Advanced); default off: claims
+# stay on this computer. Set true to share them with the public ledger.
+claimidx_public_ledger = false
 
 # --- Partner controls (also on status bar / Settings → Security & power) ---
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
@@ -169,7 +169,7 @@ claimidx_public_ledger = true
 # house_rules_audit = true
 
 # Memory harness (chat compression)
-# harness_mode = "auto"     # off | manual | auto
+# harness_mode = "auto"     # auto | off (keep a long conversation inside the model window)
 # harness_min_context_pct = 0.75
 # harness_max_context_pct = 0.92
 

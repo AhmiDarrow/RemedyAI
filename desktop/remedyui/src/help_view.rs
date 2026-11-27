@@ -277,10 +277,10 @@ fn bundled_image(src: &str) -> Option<Image> {
     let clean = src.trim_start_matches("./").trim_start_matches('/');
     let bytes: &[u8] = match clean {
         "assets/hero_logo_color_on_dark.png" => {
-            include_bytes!("../../src/help/assets/hero_logo_color_on_dark.png")
+            include_bytes!("../help/assets/hero_logo_color_on_dark.png")
         }
         "assets/remedy-partner-architecture.jpg" => {
-            include_bytes!("../../src/help/assets/remedy-partner-architecture.jpg")
+            include_bytes!("../help/assets/remedy-partner-architecture.jpg")
         }
         _ => return None,
     };

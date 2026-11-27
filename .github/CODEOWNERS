@@ -6,8 +6,4 @@
 # High-risk surfaces: signing, CI, security, ship.
 .github/ @AhmiDarrow
 desktop/src-tauri/ @AhmiDarrow
-src/remedy/core/security.py @AhmiDarrow
-src/remedy/core/approvals.py @AhmiDarrow
-src/remedy/core/self_inject_pr.py @AhmiDarrow
-src/remedy/core/self_inject_guard.py @AhmiDarrow
 scripts/set_tauri_signing_secrets.py @AhmiDarrow

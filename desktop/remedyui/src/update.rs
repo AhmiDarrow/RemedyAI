@@ -450,9 +450,37 @@ pub(crate) fn press_offer() {
     });
 }
 
+/// Whether the app may look for an update on its own at launch. `update_check = "ask"`
+/// in `config.toml` (Settings, System, Updates) means only when the owner asks.
+pub(crate) fn launch_check_allowed() -> bool {
+    let text = std::fs::read_to_string(crate::fonts::config_path()).unwrap_or_default();
+    launch_check_allowed_in(&text)
+}
+
+fn launch_check_allowed_in(config: &str) -> bool {
+    let choice = config
+        .parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("update_check").and_then(|v| v.as_str()).map(str::to_lowercase));
+    choice.as_deref().map(str::trim) != Some("ask")
+}
+
+#[cfg(test)]
+mod launch_check_tests {
+    #[test]
+    fn launch_check_follows_the_update_setting() {
+        use super::launch_check_allowed_in as allowed;
+        assert!(allowed(""));
+        assert!(allowed(r#"update_check = "auto""#));
+        assert!(!allowed("llm_provider = \"x\"\nupdate_check = \"ask\"\n[fonts]\nui = \"a\"\n"));
+        // A key of the same name inside a table is not the setting.
+        assert!(allowed("[other]\nupdate_check = \"ask\"\n"));
+    }
+}
+
 pub(crate) fn spawn_startup_check(app: &App) {
     bind_app(app);
-    if checks_disabled() || BUSY.swap(true, Ordering::SeqCst) {
+    if checks_disabled() || !launch_check_allowed() || BUSY.swap(true, Ordering::SeqCst) {
         return;
     }
     let app2 = app.clone();
@@ -1258,7 +1286,7 @@ mod tests {
     #[test]
     fn nsis_keeps_silent_update_and_user_data() {
         let nsi = include_str!("../packaging/windows/installer.nsi");
-        let hooks = include_str!("../../src-tauri/windows/hooks.nsh");
+        let hooks = include_str!("../packaging/windows/hooks.nsh");
         assert!(nsi.contains("NSIS_HOOK_PREINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_POSTINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_PREUNINSTALL"));
@@ -1378,16 +1406,16 @@ mod tests {
             .arg(format!("/DIROHSRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DCORESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DWEBUISRCPATH={}", as_nsis(&webui)))
-            .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))
+            .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("remedyui/packaging/windows/hooks.nsh"))))
             .arg(format!(
                 "/DUNINSTALL_OPTIONS={}",
-                as_nsis(&desktop.join("src-tauri/windows/uninstall_options.ps1"))
+                as_nsis(&desktop.join("remedyui/packaging/windows/uninstall_options.ps1"))
             ))
             .arg(format!(
                 "/DUNINSTALL_WIPE={}",
-                as_nsis(&desktop.join("src-tauri/windows/uninstall_wipe.ps1"))
+                as_nsis(&desktop.join("remedyui/packaging/windows/uninstall_wipe.ps1"))
             ))
-            .arg(format!("/DINSTALLERICON={}", as_nsis(&desktop.join("src-tauri/icons/icon.ico"))))
+            .arg(format!("/DINSTALLERICON={}", as_nsis(&desktop.join("remedyui/assets/icons/icon.ico"))))
             .arg(&nsi)
             .status()
             .expect("spawn makensis");

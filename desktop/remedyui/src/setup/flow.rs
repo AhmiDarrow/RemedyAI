@@ -440,6 +440,9 @@ fn reveal_offer_or_name(offer: &Offer, name: &NamePrompt, setup_doc: &Option<Val
 }
 
 fn publish_update(waker: &Waker, updater: &Updater, ready: &Signal<bool>) {
+    if !crate::update::launch_check_allowed() {
+        return;
+    }
     let Ok(body) = api::fetch_latest_json() else {
         return;
     };
@@ -661,7 +664,11 @@ fn surface(ui: &Ui, gate: Gate) -> El {
             move || studio_on.get() == Surface::Studio,
             {
                 let gate = gate.clone();
-                move || studio_layer(&ui_studio, gate.clone())
+                // Built again when the theme changes: its surfaces copy the colours.
+                move || {
+                    let gate = gate.clone();
+                    crate::settings::with_look(&ui_studio, true, move |ui| studio_layer(ui, gate.clone()))
+                }
             },
         )))
 }

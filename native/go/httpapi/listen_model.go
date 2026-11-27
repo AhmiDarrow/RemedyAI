@@ -172,10 +172,12 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 			return nil
 		}
 	}
+	// With Sleev on, a cloud provider's requests go through the gateway.
+	urlOut, routeHeaders := sleevRoute(cfg, prov, urlOut)
 	if prov == "anthropic" {
 		if k := strings.TrimSpace(key); k != "" && !isPlaceholderKey(k) {
 			return &providers.Anthropic{
-				BaseURL: urlOut, APIKey: k, Model: modelID,
+				BaseURL: urlOut, APIKey: k, Model: modelID, Headers: routeHeaders,
 				Gen: generationOptionsFor(cfg, prov, modelID),
 			}
 		}
@@ -189,6 +191,7 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 		Model:   modelID,
 		Family:  providers.FamilyFor(prov),
 		Gen:     generationOptionsFor(cfg, prov, modelID),
+		Headers: routeHeaders,
 	}
 }
 

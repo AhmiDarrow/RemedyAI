@@ -81,7 +81,7 @@ def api(token: str, method: str, url: str, data: dict | None = None):
 
 
 def encrypt(public_key_b64: str, secret_value: str) -> str:
-    pk = public.PublicKey(public_key_b64.encode("utf-8"), encoding.Base64Encoder())
+    pk = public.PublicKey(public_key_b64.encode("utf-8"), encoding.Base64Encoder)
     sealed = public.SealedBox(pk).encrypt(secret_value.encode("utf-8"))
     return base64.b64encode(sealed).decode("utf-8")
 

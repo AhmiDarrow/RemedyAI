@@ -8,7 +8,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Layer | Path | Role |
 |-------|------|------|
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
-| Python package | `src/remedy/` | The `remedy` launcher only: it finds or downloads `remedy-runtime` and hands it the command line (standard library, no dependencies). Also holds the bundled skills, which the runtime loads as data |
+| Python tooling | `scripts/`, `tests/` | Developer tooling only (gates, release script), run with `uv run`. Remedy ships no Python |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |

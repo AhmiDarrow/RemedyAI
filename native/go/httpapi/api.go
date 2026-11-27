@@ -281,7 +281,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/memory/search", s.handleMemorySearch)
 	s.mux.HandleFunc("GET /api/memory/facts", s.handleMemoryFacts)
 	s.mux.HandleFunc("POST /api/memory/persona-wipe", s.handleMemoryPersonaWipe)
-	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /api/commands", s.handleListCommands)
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("POST /api/tools/invoke", s.handleInvokeTool)
@@ -296,7 +295,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /api/coordination/presence", s.handleCoordinationPresence)
 	s.mux.HandleFunc("GET /api/continuity/dashboard", s.handleContinuityDashboard)
-	s.mux.HandleFunc("GET /api/nanoswarm/status", s.handleNanoswarmStatus)
 	s.mux.HandleFunc("GET /api/nanoswarm/token/status", s.handleNanoswarmTokenStatus)
 	s.mux.HandleFunc("POST /api/projects/scan", s.handleProjectsScan)
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
@@ -512,11 +510,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.apiListenPort = listenPort(ln)
 	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
-	// Installed after first launch and only while the owner's switch is on.
+	// Runs when already installed; installed only once the owner turns it on.
 	// It works in the background and never holds the runtime up.
 	s.claimidx.Apply()
 	bindSearchHost(s.searchHost)
-	s.searchHost.Apply()
+	s.searchHost.ApplyIfInstalled()
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
 	s.startPartnerDispatcher(ctx)
@@ -616,8 +614,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 			"effective": "native",
 			"ready":     true,
 			"components": map[string]any{
-				"go":  map[string]any{"ready": true, "reason": "serving"},
-				"zig": map[string]any{"ready": false, "reason": "not-probed"},
+				"go": map[string]any{"ready": true, "reason": "serving"},
 			},
 		},
 	})

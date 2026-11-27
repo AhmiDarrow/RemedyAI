@@ -1,59 +1,16 @@
 [project]
-# Distribution name on PyPI. Do NOT use "remedy" — that name is occupied by an
-# unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
-# Import package and CLI entry point remain `remedy`.
-name = "remedy-ai"
+# Developer tooling only (scripts/ and their tests, run with `uv run`).
+# Remedy itself is not a Python package; install it with the desktop
+# installers or scripts/install.sh / scripts/install.ps1.
+name = "remedy-tooling"
 version = "2.0.0"
-description = "Personal AI partner for any ability level — drives this computer to finish goals (life tasks, research, games, code). Not a medical product."
-readme = "README.md"
+description = "Repository tooling for Remedy (not published)."
 license = { text = "Apache-2.0" }
-authors = [
-    { name = "Ahmi Darrow", email = "ahmitdarrow@gmail.com" }
-]
-keywords = ["ai", "partner", "desktop", "agent", "voice", "computer-use", "skill", "memory", "llm", "tools"]
-# License is project.license (Apache-2.0). Avoid deprecated
-# "License :: …" classifiers (PEP 639 / packaging warning).
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Software Development :: Libraries :: Application Frameworks",
-]
 requires-python = ">=3.12"
-# The package is the `remedy` launcher: it finds (or downloads) the native
-# runtime and hands it the command line. Standard library only.
 dependencies = []
 
-[project.optional-dependencies]
-# Sprite-sheet post-processing for the bundled game-assets skill
-# (scripts/sheet_tools.py). Pillow only, no network.
-game-assets = [
-    "pillow>=10.0.0,<13",
-]
-
-[project.urls]
-Homepage = "https://github.com/AhmiDarrow/RemedyAI"
-Repository = "https://github.com/AhmiDarrow/RemedyAI"
-Documentation = "https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md"
-Changelog = "https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md"
-Issues = "https://github.com/AhmiDarrow/RemedyAI/issues"
-
-[project.scripts]
-remedy = "remedy.interfaces.cli.launcher:main"
-# Standalone MCP stdio host (any MCP-compatible client can call this binary):
-# the same as `remedy mcp serve`.
-remedy-mcp = "remedy.interfaces.cli.launcher:mcp_main"
-
-[build-system]
-requires = ["uv_build>=0.11.31,<0.12.0"]
-build-backend = "uv_build"
-
-# Dist name is remedy-ai; import package stays `remedy` under src/remedy/
-[tool.uv.build-backend]
-module-name = "remedy"
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -105,7 +62,7 @@ platform = "linux"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
-files = ["src/remedy"]
+files = ["scripts"]
 exclude = []
 
 [dependency-groups]
@@ -115,5 +72,6 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
+    "pyyaml>=6.0",
     "ruff>=0.11.0",
 ]

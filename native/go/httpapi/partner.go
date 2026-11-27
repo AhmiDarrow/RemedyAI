@@ -61,6 +61,8 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	organism["life_folder"] = lifeFolder
 
+	// What the engine measured for this session since the runtime started.
+	measured := harnessFor(sidKey)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":           s.version,
 		"pending_approvals": len(pending),
@@ -70,22 +72,22 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 		"next_action":       next,
 		"last_step":         lastStep,
 		"life_folder":       lifeFolderOut,
-		"cas":               nil,
 		"organism":          organism,
 		"access_scope":      accessScope,
 		"harness_mode":      harness,
-		"brief_intent":      "",
 		"session_id":        sessionID,
 		"approvals":         approvalsOut,
-		"nanoswarm":         map[string]any{"active": false},
-		"session_quality":   map[string]any{},
-		"provider_health":   map[string]any{},
-		"metabolism":        map[string]any{},
-		"soma":              map[string]any{},
-		"hearth":            s.hearthPublic(time.Now(), activeTitle, nextAction),
-		"learn_log":         readLearnLog(s.homeDir, 20),
-		"alive":             readAlivePublic(s.homeDir),
-		"inner_language":    readInnerLanguagePublic(s.homeDir),
+		"session_quality": map[string]any{
+			"turns": measured.Turns, "compress_count": measured.Compactions,
+			"tokens_saved_by_compress": measured.TokensSaved, "max_tool_fail_streak": measured.MaxFailStreak,
+		},
+		"provider_health": map[string]any{
+			"samples": measured.ModelCalls, "errors": measured.ModelErrors, "rate_limit_hits": measured.RateLimited,
+		},
+		"hearth":         s.hearthPublic(time.Now(), activeTitle, nextAction),
+		"learn_log":      readLearnLog(s.homeDir, 20),
+		"alive":          readAlivePublic(s.homeDir),
+		"inner_language": readInnerLanguagePublic(s.homeDir),
 	})
 }
 

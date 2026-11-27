@@ -7,8 +7,7 @@ and Linux / macOS packages need their own runners. This script does the rest,
 exactly as the old GitHub release job did:
 
     uv run python scripts/release_local.py v0.72.0 --dry-run   # check, stage, no publishing
-    uv run python scripts/release_local.py v0.72.0             # publish both releases + PyPI
-    uv run python scripts/release_local.py v0.72.0 --no-pypi   # releases only
+    uv run python scripts/release_local.py v0.72.0             # publish both releases
 
 1. The tag must point at HEAD, every version surface must read it, the commit
    must be on ``origin/master``, and this machine's gate must have recorded a
@@ -17,14 +16,13 @@ exactly as the old GitHub release job did:
 3. Stage the standalone runtime assets and ``remedy-native-SHA256SUMS.txt``,
    write ``latest.json``, split the files between the main release (what a
    person downloads, plus ``latest.json``) and the ``runtime-v<ver>``
-   companion prerelease (pip first-run assets, macOS updater tarballs, every
+   companion prerelease (install-script assets, macOS updater tarballs, every
    ``.sig``), and check both sets.
 4. Publish the companion release first, then the main release. Publishing the
    companion release triggers ``verify-release-assets.yml``, which re-checks
-   the macOS and ARM binaries on native runners.
-5. Build the PyPI wheel with the WebUI and the runtime hashes pinned from
-   step 3, re-verify the published assets against the pins, check the wheel,
-   and ``uv publish`` it (credentials from the environment or ``~/.pypirc``).
+   the macOS and ARM binaries on native runners. ``scripts/install.sh`` and
+   ``scripts/install.ps1`` download from the companion release and verify
+   against ``remedy-native-SHA256SUMS.txt``.
 """
 
 from __future__ import annotations
@@ -442,9 +440,8 @@ def runtime_notes(version: str) -> str:
     return (
         f"Support files for [Remedy Desktop v{version}](https://github.com/{OWNER}/{REPO}/releases/tag/v{version}). "
         "**You do not need to download anything here.**\n\n"
-        "- `pip install remedy-ai` fetches `remedy-runtime` / `remedy_core` and the HQ voice references from this "
-        "release on first run and checks each file against the sha256 pinned inside the wheel (the PyPI wheel is "
-        "built from this file after the release).\n"
+        "- The install script (`scripts/install.sh` / `scripts/install.ps1`) downloads `remedy-runtime` / "
+        "`remedy_core` from this release and checks each file against `remedy-native-SHA256SUMS.txt`.\n"
         "- The in-app updater downloads the macOS `.app.tar.gz` from here. Every `.sig` is a minisign signature "
         "for an updater file.\n\n"
         f"Installers are on the [v{version} release](https://github.com/{OWNER}/{REPO}/releases/tag/v{version}).\n"
@@ -468,7 +465,7 @@ def main_notes(version: str, prerelease: bool) -> str:
 | Mac with Apple Silicon (M1 and later) | `Remedy.Desktop_{v}_aarch64.dmg` |
 | Mac with Intel | `Remedy.Desktop_{v}_x64.dmg` |
 | Linux (x86_64) | `.AppImage` (any distro) or `.deb` (Debian/Ubuntu) |
-| Command line, any OS | `pip install remedy-ai` |
+| No desktop (server, SSH) | the install script, see below |
 
 The Mac app is unsigned: the first time, right-click it in Applications and choose **Open**. `latest.json` is for the in-app updater. Runtime and signature files are on the [runtime-v{v}](https://github.com/{OWNER}/{REPO}/releases/tag/runtime-v{v}) companion release, and you never need to download them.
 
@@ -495,9 +492,9 @@ Close (✕) on Linux / WSLg minimizes to the taskbar (no tray). Maximize uses th
 
 No Python, Node, or Rust required.
 
-### CLI runtime (`pip install remedy-ai`)
+### No desktop (server, SSH)
 
-The first `remedy serve` on a PyPI install downloads the standalone `remedy-runtime` / `remedy_core` pair for this OS from the `runtime-v{v}` companion release, verifies it against the checksums pinned inside the wheel, and caches it under `~/.remedy/runtime/`. Chatterbox HQ downloads `remedy-voice-*.wav` the same way into `~/.remedy/voice/references/`.
+Run `scripts/install.sh` (Linux, macOS) or `scripts/install.ps1` (Windows) from the repository. It downloads the standalone `remedy-runtime` / `remedy_core` pair for this OS from the `runtime-v{v}` companion release, verifies it against `remedy-native-SHA256SUMS.txt`, and installs the `remedy` command.
 
 ### Auto-update
 This release is **minisign-signed**. Windows NSIS, Linux AppImage, and macOS `.app.tar.gz` installs with the embedded updater pubkey (v0.10.2+) can check and install updates in-app. Linux `.deb` installs still update from this page (`sudo apt install` the new `.deb`). macOS builds are not Apple-notarized.
@@ -527,34 +524,10 @@ def publish_releases(version: str, sha: str, main: Path, runtime: Path, prerelea
     _say(f"  [ok] published v{version}")
 
 
-def build_wheel(work: Path, *, published: bool, upload: bool) -> None:
-    sums = work / "release-runtime" / "remedy-native-SHA256SUMS.txt"
-    _run(["uv", "run", "python", "scripts/stage_wheel_webui.py", "--build"])
-    _run(["uv", "run", "python", "scripts/pin_native_hashes.py", "--sums", str(sums)])
-    pins = ROOT / "src" / "remedy" / "runtime" / "native_pins.json"
-    if published:
-        built = pins.read_bytes()
-        _run(["uv", "run", "python", "scripts/pin_native_hashes.py", "--from-release", "--verify-assets"])
-        if pins.read_bytes() != built:
-            raise ReleaseError("the published checksum file differs from the one this run built")
-    _run(["uv", "run", "python", "scripts/pin_native_hashes.py", "--check"])
-    dist = ROOT / "dist"
-    if dist.exists():
-        shutil.rmtree(dist)
-    _run(["uv", "build"])
-    wheels = sorted(str(p) for p in dist.glob("*.whl"))
-    _run(["uv", "run", "python", "scripts/check_wheel.py", "--release", *wheels])
-    _say("  [ok] wheel built and checked: " + ", ".join(Path(w).name for w in wheels))
-    if upload:
-        _run(["uv", "publish"])
-        _say("  [ok] published to PyPI")
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("tag", help="release tag, e.g. v0.72.0")
     parser.add_argument("--dry-run", action="store_true", help="check and stage everything; publish nothing")
-    parser.add_argument("--no-pypi", action="store_true", help="publish the GitHub releases only")
     parser.add_argument("--wait-min", type=int, default=180, help="how long to wait for GitHub's build")
     parser.add_argument("--work", default=str(ROOT / ".release-work"), help="staging directory (gitignored)")
     args = parser.parse_args(argv)
@@ -579,8 +552,6 @@ def main(argv: list[str] | None = None) -> int:
         _say(f"  channel: {'prerelease' if prerelease else 'stable'}")
         if not args.dry_run:
             publish_releases(version, sha, main_dir, runtime_dir, prerelease, work)
-        if not args.no_pypi:
-            build_wheel(work, published=not args.dry_run, upload=not args.dry_run)
     except ReleaseError as exc:
         _say(f"release_local: FAILED: {exc}")
         return 1

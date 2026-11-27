@@ -66,7 +66,6 @@ IS_WINDOWS = platform.system() == "Windows"
 ZERO_SHA = "0" * 40
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([.-].*)?$")
 PROTECTED_BRANCHES = ("master", "main")
-IMPORT_SMOKE = 'python -c "import remedy; print(\'import OK\')"'
 
 
 # --------------------------------------------------------------------------- #
@@ -150,6 +149,9 @@ RUST_ENV = {
     "TAURI_CONFIG": '{"bundle":{"active":false,"externalBin":[],"resources":null}}',
     "RUSTFLAGS": "-D warnings",
 }
+# Cargo lanes without the Tauri settings: the job count comes from the
+# environment (default 6) so parallel lanes do not starve the machine.
+CARGO_ENV = {"CARGO_BUILD_JOBS": os.environ.get("CARGO_BUILD_JOBS", "6")}
 RUST_WSL_ENV = {
     **RUST_ENV,
     # TAURI_CONFIG is JSON with double quotes; do not embed it in bash -lc.
@@ -158,20 +160,19 @@ RUST_WSL_ENV = {
 
 CHECKS = Lane(
     "checks",
-    "Sanitize, lint, types, docs, import smoke",
+    "Sanitize, lint, types, docs",
     (
         Step("sanitize", "uv run python scripts/check_sanitize.py"),
         Step("ruff", "uv run ruff check . --no-fix"),
         Step("mypy", "uv run mypy"),
         Step("mypy exclude may only shrink", "uv run python scripts/check_mypy_exclude.py"),
-        Step("import smoke", "uv run " + IMPORT_SMOKE),
         Step("docs sync", "uv run python scripts/check_docs.py"),
     ),
 )
 
 PYTHON = Lane(
     "python",
-    "Full pytest suite (this OS) + wheel",
+    "Tooling pytest suite (this OS)",
     (
         Step("native core present", REQUIRE_NATIVE_CORE),
         Step(
@@ -179,10 +180,9 @@ PYTHON = Lane(
             "uv run pytest -q --tb=short -p no:cacheprovider",
             env=NATIVE_CORE_ENV,
         ),
-        Step("uv build", "uv build"),
     ),
     # Timing-sensitive tests (telephony frame pacing) must not share the box
-    # with cargo and gradle; this lane runs after the parallel lanes finish.
+    # with cargo; this lane runs after the parallel lanes finish.
     serial_after_others=True,
     # Library-backed tests load the core the native lane just built.
     requires=("native",),
@@ -212,9 +212,9 @@ DESKTOP = Lane(
 
 RUST = Lane(
     "rust",
-    "Tauri shell (cargo)",
+    "Rust helpers: phone transport core and the mobile-data endpoint (cargo)",
     (
-        Step("cargo test", "cargo test --locked", cwd="desktop/src-tauri", env=RUST_ENV),
+        Step("cargo test (connect core)", "cargo test --locked", cwd="connect/core", env=RUST_ENV),
         Step("cargo test (iroh sidecar)", "cargo test --locked", cwd="native/iroh", env=RUST_ENV),
     ),
 )
@@ -252,22 +252,21 @@ NATIVE = Lane(
     ),
 )
 
-ANDROID = Lane(
-    "android",
-    "RemedyConnect Android (gradle)",
-    (
-        Step(
-            "gradle",
-            "./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease",
-            cwd="android",
-            windows_command=(
-                r".\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease"
-            ),
-        ),
-    ),
+REMEDYUI = Lane(
+    "remedyui",
+    "RemedyUI desktop (cargo test)",
+    (Step("cargo test", "cargo test", cwd="desktop/remedyui", env=CARGO_ENV),),
 )
 
-LANES: tuple[Lane, ...] = (CHECKS, LINUX, DESKTOP, RUST, NATIVE, ANDROID, PYTHON)
+# Host build only; the Android package step needs the device toolchain and is
+# not part of the gate.
+CONNECT = Lane(
+    "connect",
+    "RemedyConnect phone app (cargo check)",
+    (Step("cargo check", "cargo check", cwd="connect/app", env=CARGO_ENV),),
+)
+
+LANES: tuple[Lane, ...] = (CHECKS, LINUX, DESKTOP, RUST, REMEDYUI, CONNECT, NATIVE, PYTHON)
 
 
 # --------------------------------------------------------------------------- #
@@ -507,18 +506,18 @@ def _wsl_go_test_command() -> str | None:
 
 
 def _wsl_cargo_command() -> str | None:
-    """``rust-desktop`` Linux ``cargo test/check --locked``, under WSL.
+    """Linux ``cargo test --locked`` of a shipped Rust crate, under WSL.
 
     Windows cargo does not type-check ``cfg(not(target_os = "windows"))``
     unused bindings; ubuntu-22.04 CI does, with ``RUSTFLAGS=-D warnings``.
-    Target dir is ``/tmp`` so this does not share ``desktop/src-tauri/target``
-    with the Windows cargo steps. Returns None on a Linux host; "" without WSL.
+    It runs on the mobile-data endpoint, a crate that ships on Linux. Target
+    dir is ``/tmp`` so this does not share a target with the Windows cargo steps. Returns None on a Linux host; "" without WSL.
     """
     if not IS_WINDOWS:
         return None
     if shutil.which("wsl") is None:
         return ""
-    tauri = _wsl_path(ROOT / "desktop" / "src-tauri")
+    tauri = _wsl_path(ROOT / "native" / "iroh")
     inner = (
         f"cd {tauri} && "
         "export CARGO_TARGET_DIR=/tmp/remedy-prepush-cargo && "
@@ -710,7 +709,9 @@ def with_required_lanes(keys: set[str]) -> set[str]:
 # Reduced gate for test- and docs-only changes (owner decision, 2026-11)
 # --------------------------------------------------------------------------- #
 
-ALL_LANE_KEYS = frozenset({"checks", "linux", "desktop", "rust", "native", "android", "python"})
+ALL_LANE_KEYS = frozenset(
+    {"checks", "linux", "desktop", "rust", "remedyui", "connect", "native", "python"}
+)
 
 
 def lanes_for_paths(paths: list[str]) -> set[str] | None:
@@ -718,7 +719,7 @@ def lanes_for_paths(paths: list[str]) -> set[str] | None:
     path needs the full matrix.
 
     Only files that cannot change what ships qualify: Markdown, Python tests,
-    desktop ``*.test.ts(x)``, Go ``*_test.go`` and Android unit tests. The
+    desktop ``*.test.ts(x)`` and Go ``*_test.go``. The
     checks lane (sanitize, lint, types, docs) always runs. Anything else —
     app code, scripts, workflows, build or config files, test fixtures that
     other stacks read — needs every lane.
@@ -732,11 +733,13 @@ def lanes_for_paths(paths: list[str]) -> set[str] | None:
             continue
         if p.endswith(".md"):
             # Markdown that ships: help articles are bundled into the SPA,
-            # bundled skills are read by the Python runtime and its tests.
-            if p.startswith("desktop/"):
+            # bundled skills are compiled into the Go runtime.
+            if p.startswith("desktop/remedyui/"):
+                lanes.add("remedyui")
+            elif p.startswith("desktop/"):
                 lanes.add("desktop")
-            elif p.startswith("src/"):
-                lanes |= {"linux", "python"}
+            elif p.startswith("native/go/"):
+                lanes |= {"native", "linux"}
             continue
         if p.startswith("tests/") and p.endswith(".py"):
             lanes |= {"linux", "python"}
@@ -744,8 +747,6 @@ def lanes_for_paths(paths: list[str]) -> set[str] | None:
             lanes.add("desktop")
         elif p.startswith("native/go/") and p.endswith("_test.go"):
             lanes |= {"native", "linux"}
-        elif p.startswith("android/") and "/src/test/" in p:
-            lanes.add("android")
         else:
             return None
     return lanes

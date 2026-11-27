@@ -105,7 +105,18 @@ fn files_navigate_with_breadcrumbs_history_and_a_tree() {
     assert!(app.find(Role::Button, "Forward").is_some());
     assert!(app.find(Role::Button, "Sort: Folders").is_some());
     assert!(app.find(Role::Button, "Expand components").is_some());
-    assert!(app.find(Role::Button, "Reveal App.tsx").is_some());
+    // A row's actions belong to the selected row: arrow down to App.tsx and they are there.
+    assert!(app.find(Role::Button, "Reveal App.tsx").is_none());
+    app.find(Role::ListBox, "Files").expect("file list").focus();
+    for _ in 0..3 {
+        app.key(KeyEvent::press(Key::ArrowDown));
+        app.frames(1);
+        if app.find(Role::Button, "Reveal App.tsx").is_some() {
+            break;
+        }
+    }
+    assert!(app.find(Role::Button, "Reveal App.tsx").is_some(), "{:?}", names(&app));
+    assert!(app.find(Role::Button, "Copy path for App.tsx").is_some());
 
     assert!(
         app.press(Role::Button, "Expand components"),

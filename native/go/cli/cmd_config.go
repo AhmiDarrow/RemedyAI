@@ -23,6 +23,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 // `remedy config`, `remedy settings` and `remedy auth` (Python
@@ -104,14 +105,20 @@ func cfgDefaultConfig(home, firstRunProject string) string {
 	).Replace(cfgDefaultTemplate)
 }
 
-// cfgEnsureNewProjectSeed makes ~/Documents/Remedy Projects/New Project, the
-// first-run sandbox folder (Python workspace.ensure_new_project_seed).
+// cfgEnsureNewProjectSeed makes Remedy Projects/New Project in the user's
+// Documents folder, the first-run sandbox folder. A seed an earlier version
+// made under the home's own Documents name stays where it is.
 func cfgEnsureNewProjectSeed() (string, error) {
 	uh, err := os.UserHomeDir()
 	if err != nil || uh == "" {
 		return "", fmt.Errorf("no user home")
 	}
 	dir := filepath.Join(uh, "Documents", "Remedy Projects", "New Project")
+	if _, err := os.Stat(dir); err != nil {
+		if docs := sysres.UserFolder(sysres.FolderDocuments, uh); docs != "" {
+			dir = filepath.Join(docs, "Remedy Projects", "New Project")
+		}
+	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
@@ -224,10 +231,9 @@ func cmdSettings(c *Ctx) int {
 	return 0
 }
 
-// cfgSnapshot is the Settings payload. The version is the one the launcher
-// passes in, else the runtime's own.
+// cfgSnapshot is the Settings payload, with the runtime's own version.
 func cfgSnapshot(home string) map[string]any {
-	return httpapi.CLISettingsSnapshot(home, strings.TrimSpace(os.Getenv("REMEDY_CLI_VERSION")))
+	return httpapi.CLISettingsSnapshot(home, "")
 }
 
 func cfgSettingsSet(c *Ctx) int {

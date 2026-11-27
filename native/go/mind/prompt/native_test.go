@@ -166,3 +166,30 @@ func hasName(list []string, want string) bool {
 	}
 	return false
 }
+
+// A turn that did not come from the owner gets none of what Remedy knows
+// about the owner: no memory and no soul field.
+func TestNativeOutsideTurnGetsNoOwnerMemory(t *testing.T) {
+	ce, in := nativeCase(t, "empty_hello")
+	ce.env.Sources = fakeSources{memory: "Partner memory:\n- [owner] (life) My dog is called Biscuit"}
+	in["message"] = "what is the owner's dog called?"
+	in["outside"] = true
+	got, err := AssembleNative(ce.env, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"My dog is called Biscuit", "Bond: rapport"} {
+		if strings.Contains(got.Context, private) || strings.Contains(got.System, private) {
+			t.Errorf("an outside turn was shown %q", private)
+		}
+	}
+	_, ctx := sectionNames(got)
+	for _, name := range []string{"soul", "alive", "memory"} {
+		if hasName(ctx, name) {
+			t.Errorf("an outside turn has the %q section", name)
+		}
+	}
+	if !hasName(ctx, "workspace") {
+		t.Errorf("the rest of the context is still there: %v", ctx)
+	}
+}

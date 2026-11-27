@@ -65,14 +65,8 @@ func IsCLI(args []string) bool {
 	return commandWords(Root())[first]
 }
 
-// Version is what `remedy --version` prints. The Python launcher passes the
-// pip package version in REMEDY_CLI_VERSION; a bare binary prints its own.
-func Version(fallback string) string {
-	if v := strings.TrimSpace(os.Getenv("REMEDY_CLI_VERSION")); v != "" {
-		return v
-	}
-	return fallback
-}
+// Version is what `remedy --version` prints: the runtime's own version.
+func Version(fallback string) string { return fallback }
 
 // Run executes one CLI invocation and returns the process exit code.
 func Run(args []string, out, errw io.Writer, in io.Reader, hooks Hooks, version string) int {

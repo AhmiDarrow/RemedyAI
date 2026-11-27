@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/csv"
 	"encoding/json"
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -195,5 +196,30 @@ func TestUsageCSVQuotesProvider(t *testing.T) {
 	}
 	if len(records) != 2 || len(records[1]) != 5 || records[1][1] != provider {
 		t.Fatalf("bad csv: %#v", records)
+	}
+}
+
+// The summary says how much input came from the provider's cache.
+func TestUsageSummaryCountsCachedInput(t *testing.T) {
+	s, home := newUsageTestServer(t)
+	for _, u := range []cognition.Usage{
+		{PromptTokens: 200, CompletionTokens: 10, TotalTokens: 1010, CacheReadTokens: 800},
+		{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 1010, CacheReadTokens: 700, CacheWriteTokens: 200},
+	} {
+		if err := recordUsage(home, "s1", "xai", "m", u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body, text := doUsage(t, s, http.MethodGet, "/api/usage/summary")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", code, text)
+	}
+	totals, _ := body["totals"].(map[string]any)
+	if int(totals["cache_read_tokens"].(float64)) != 1500 || int(totals["cache_write_tokens"].(float64)) != 200 {
+		t.Fatalf("totals=%v", totals)
+	}
+	// 1500 of the 2000 input tokens (300 full price, 1500 read, 200 written).
+	if rate, _ := totals["cache_hit_rate"].(float64); rate < 0.749 || rate > 0.751 {
+		t.Fatalf("cache_hit_rate=%v", totals["cache_hit_rate"])
 	}
 }

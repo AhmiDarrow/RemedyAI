@@ -40,22 +40,26 @@ The form below is the same settings, in the older step-by-step wizard. Use
 
 ### 1. Welcome
 
-- Short product intro  
+- Remedy greets you with a plain face. Once setup knows your name and hers, she gets a face of her own: its shape, eyes and color are drawn from the two of you and this install, and it gains detail the longer you work together. Ask her for a new face, or for the old one back.  
+- **Use the recommended setup** — on this PC, no account, no key. Then a folder, your name, and the Grove.  
+- **More options** opens the full provider list (On this PC, Demo, Ollama, paid models, xAI, custom).  
 - **Language** pick (default Auto — matches this computer). Change anytime in Settings → You & Agent.  
-- **Get Started** or **Skip setup (configure later)**  
+- **Skip for now** applies defaults and enters the Grove.  
 
-### 2. Provider
+### 2. Provider (More options)
 
 | Choice | Notes |
 |--------|--------|
+| **On this PC** | Recommended local default. No account, no key. |
+| **Demo** | Rate-limited free gateway. Switch later in Settings. |
+| **Ollama** | No key if Ollama is running locally |
 | OpenAI / Anthropic / Google / DeepSeek / Groq / Mistral / OpenRouter | Paste API key |
 | **xAI (Grok)** | **Sign in with xAI** (OAuth) *or* console API key |
-| **Ollama** | No key if Ollama is running locally |
 | **Custom** (Advanced) | OpenAI-compatible base URL |
 
 - Model list follows the selected provider.  
 - Local URLs (`127.0.0.1` / `localhost`) do not require a key.  
-- You cannot proceed without a key (or xAI sign-in / Ollama) unless you **Skip**.
+- You cannot proceed without a key (or xAI sign-in / On this PC / Ollama / Demo) unless you **Skip**.
 
 ### 3. Workspace
 
@@ -71,10 +75,8 @@ Optional default **project folder** — working directory for tools, shell, and 
 Vision, voice, Claimidx, and local helpers **download automatically** the first time
 Remedy starts. You can finish setup while they continue in the background.
 If the voice pack did not arrive, Settings → Voice has **Download Remedy's
-voice**. In Remedy Desktop the voice engines live in a small Python of their
-own under `~/.remedy/voice/runtime/` (downloaded and verified on first use,
-~70 MB) together with her voice model. From a
-`pip` install, Advanced still shows the pip command.
+voice**. In Remedy Desktop the voice runs in the native `remedy-voice`
+helper. The speech models download once and are checked before use.
 
 Claimidx is installed in its own environment under `~/.remedy/claimidx/`,
 seeded with prior art, and started with Remedy on `127.0.0.1:17340`. It uses a
@@ -137,8 +139,7 @@ Settings detail and main-bar detail are independent preferences.
 - Remedy **stretches out** in the background: hardware (RAM / GPU), tools on
   PATH (`python`, `git`, `uv`, …), user folders (Desktop / Documents / …),
   and a few local doors (Ollama, ComfyUI, RMB). No disk crawl. The map lives
-  in `~/.remedy/host/home.json` and injects as a **This home** line. Refresh
-  with `/stretch` (alias `/home`) after you install tools. `/whoami` shows it.
+  in `~/.remedy/host/home.json` and injects as a **This home** line. `/whoami` shows it.
 
 ## Corrupt config recovery
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/houserules"
@@ -231,8 +232,22 @@ func (s *Server) executeMoreSlash(sessionID, raw string, phone bool) map[string]
 		if s.sessions == nil {
 			return say("Memory is not available right now.")
 		}
-		if err := s.sessions.insertMemoryNote(truncateRunes(arg, 60), arg, sessionID, 0.8, map[string]any{"source": "slash"}); err != nil {
+		if looksLikeSecret(arg) {
+			return say("That looks like a key or a password. Memory is not the place for one, so it was not saved.")
+		}
+		// Typed by the owner as a command: theirs, and asked for.
+		meta := map[string]any{"source": "explicit", "authority": "owner", "inferred": false, "why": "you asked to remember"}
+		if sessionID != "" {
+			meta["session_id"] = sessionID
+		}
+		if err := s.sessions.insertMemoryNote(truncateRunes(arg, 60), arg, sessionID, 0.8, meta); err != nil {
 			return say("Could not save that: %s", err.Error())
+		}
+		if utf8.RuneCountInString(arg) < 400 {
+			_, _ = s.sessions.upsertProfileFact("default", profileFactWrite{
+				Text: arg, Category: "general", Source: "explicit", Authority: "owner",
+				Why: "you asked to remember", SessionID: sessionID, Confidence: 0.9, Force: true,
+			})
 		}
 		return say("Saved to memory: %s", truncateRunes(arg, 200))
 

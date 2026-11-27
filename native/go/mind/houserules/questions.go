@@ -62,7 +62,9 @@ var questions = []question{
 		{key: "sarcasm_mode", def: false, kind: "bool"},
 	}},
 	{"provider", "Provider", "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.", "setup", []field{
-		{key: "llm_provider", def: "demo", kind: "str"},
+		// No default: a provider receives what the owner types, so one is
+		// used only after the owner picked it.
+		{key: "llm_provider", def: "", kind: "str"},
 		{key: "llm_model", def: "", kind: "str"},
 		{key: "llm_base_url", def: "", kind: "str"},
 		{key: "custom_llm_name", def: "", kind: "str"},
