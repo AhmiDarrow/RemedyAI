@@ -68,6 +68,7 @@ func RegisterShellTools(registry *Registry) error {
 				"cwd":{"type":"string","description":"Absolute working directory. Defaults to the bound project folder; a directory outside the allowed scope is clamped back to it."},
 				"timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"description":"Kill the command after this long (default 600000, ten minutes). On timeout exit_code is 1 and timed_out is true."},
 				"background":{"type":"boolean","description":"Start the command and return a job_id immediately instead of waiting. Use the jobs tool to tail or kill it."},
+				"shell":{"type":"string","enum":["bash","powershell"],"description":"Windows only: run this one command in Git Bash or in PowerShell instead of the default shell. Ignored elsewhere."},
 				"wsl":{"type":"boolean","description":"Run the command in WSL bash instead of the host shell. Windows drive-letter paths (C:\\...) in the command and cwd are converted to /mnt/c/.... Only available on Windows."},
 				"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Extra environment variables merged into the child's environment. Module-search paths (PYTHONPATH, NODE_PATH, …) are refused."},
 				"write_roots":{"type":"array","items":{"type":"string","minLength":1},"maxItems":16,"description":"Write-jail roots (bound by the runtime from the session; model-supplied values are ignored)"},
@@ -155,6 +156,7 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 		TimeoutMS  uint32            `json:"timeout_ms"`
 		Background bool              `json:"background"`
 		WSL        bool              `json:"wsl"`
+		Shell      string            `json:"shell"`
 		Env        map[string]string `json:"env"`
 		WriteRoots []string          `json:"write_roots"`
 		HomeDir    string            `json:"home_dir"`
@@ -208,7 +210,17 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 				return Result{}, fmt.Errorf("%s", msg)
 			}
 		}
-		argv, shellKind, err = platformShellArgvFor(runtime.GOOS, command, os.Getenv, lookPath)
+		// A shell named for this one call stands in for the owner's choice.
+		getenv := os.Getenv
+		if pick := strings.ToLower(strings.TrimSpace(body.Shell)); pick == "bash" || pick == "powershell" {
+			getenv = func(key string) string {
+				if key == RemedyShellEnv {
+					return pick
+				}
+				return os.Getenv(key)
+			}
+		}
+		argv, shellKind, err = platformShellArgvFor(runtime.GOOS, command, getenv, lookPath)
 		if err != nil {
 			return Result{}, err
 		}

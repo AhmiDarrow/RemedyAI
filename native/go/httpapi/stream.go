@@ -517,6 +517,11 @@ func (s *Server) runDetachedStream(
 		draftLen             int
 		writeFailed          bool
 		draftAnnounced       bool
+		// rowKey names the saved row the reply is being written to. It is the
+		// request id until the owner's mid-turn message is taken in; from
+		// there the reply continues in a new row (see splitAtSteer).
+		rowKey   = requestID
+		rowCount = 1
 	)
 
 	// noteWriteFailure surfaces a lost persist as an SSE error frame rather
@@ -577,7 +582,7 @@ func (s *Server) runDetachedStream(
 			return
 		}
 		msg, err := s.sessions.UpsertDraftMessage(
-			sid, requestID, "assistant", body, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model),
+			sid, rowKey, "assistant", body, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model),
 		)
 		if err != nil {
 			noteWriteFailure("draft", err)
@@ -600,12 +605,46 @@ func (s *Server) runDetachedStream(
 		persistDone = true
 		calls, results := toolLedger()
 		if _, err := s.sessions.FinalizeMessage(
-			sid, requestID, "assistant", content, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model), nil, nil,
+			sid, rowKey, "assistant", content, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model), nil, nil,
 		); err != nil {
 			noteWriteFailure("assistant message", err)
 			return
 		}
 		s.publishMessageAdded(sid, content)
+	}
+
+	// splitAtSteer closes the reply so far as a message of its own when the
+	// owner's mid-turn message is taken in. That message was saved when it was
+	// sent, so the conversation reads in the order it happened: what she had
+	// said, what the owner said, then the rest of her reply. With nothing said
+	// or done yet there is nothing to close.
+	splitAtSteer := func() {
+		if persistDone || s.sessions == nil {
+			return
+		}
+		body := strings.TrimSpace(fullResponse.String())
+		if body == "" && len(collectedToolCalls) == 0 {
+			return
+		}
+		if body == "" {
+			body = "*(Used tools — see process.)*"
+		}
+		calls, results := toolLedger()
+		if _, err := s.sessions.FinalizeMessage(
+			sid, rowKey, "assistant", body, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model), nil, nil,
+		); err != nil {
+			noteWriteFailure("assistant message", err)
+			return
+		}
+		s.publishMessageAdded(sid, body)
+		rowCount++
+		rowKey = fmt.Sprintf("%s~%d", requestID, rowCount)
+		fullResponse.Reset()
+		fullThinking.Reset()
+		collectedToolCalls, collectedToolResults, draftToolResults = nil, nil, nil
+		narrationMark, draftLen, draftAnnounced = 0, 0, false
+		// Clients close their live bubble here and start the next one.
+		ts.signal("steered", map[string]any{"request_id": requestID})
 	}
 
 	persistInterrupted := func() {
@@ -685,6 +724,7 @@ func (s *Server) runDetachedStream(
 		case strings.HasPrefix(token, "@@status:"):
 			ts.status(strings.TrimSpace(token[len("@@status:"):]))
 		case strings.HasPrefix(token, "@@steered"):
+			splitAtSteer()
 			ts.status("Taking that in…")
 		case strings.HasPrefix(token, "@@thinking_round"):
 			thinkingReplaceNext = true

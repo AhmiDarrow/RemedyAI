@@ -78,7 +78,7 @@ func TestPlatformShellArgvForGitBashWhenConfigured(t *testing.T) {
 	if kind != hostShellBash {
 		t.Fatalf("kind=%s want bash", kind)
 	}
-	if argv[len(argv)-2] != "-lc" || argv[len(argv)-1] != "echo hi && ls" {
+	if argv[len(argv)-2] != "-c" || argv[len(argv)-1] != "echo hi && ls" {
 		t.Fatalf("git bash argv=%v", argv)
 	}
 }
@@ -224,4 +224,44 @@ func containsAll(argv []string, want ...string) bool {
 		}
 	}
 	return true
+}
+
+// shellLook finds the named programs and nothing else.
+func shellLook(found map[string]string) lookPathFunc {
+	return func(name string) (string, error) {
+		if p, ok := found[name]; ok {
+			return p, nil
+		}
+		return "", errLookPathNotFound(name)
+	}
+}
+
+func TestWindowsDefaultShellIsGitBashWhenInstalled(t *testing.T) {
+	none := func(string) string { return "" }
+	both := shellLook(map[string]string{"bash.exe": `/git/bin/bash.exe`, "pwsh": `/fake/pwsh.exe`})
+	argv, kind, err := platformShellArgvFor("windows", "ls -la", none, both)
+	if err != nil || kind != hostShellBash || argv[len(argv)-2] != "-c" {
+		t.Fatalf("with Git Bash installed: kind=%s argv=%v err=%v", kind, argv, err)
+	}
+	// Windows' own bash.exe starts WSL; it is not Git Bash.
+	wsl := shellLook(map[string]string{"bash.exe": `C:/Windows/System32/bash.exe`, "pwsh": `/fake/pwsh.exe`})
+	if _, kind, err := platformShellArgvFor("windows", "ls", none, wsl); err != nil || kind != hostShellPwsh {
+		t.Fatalf("the WSL launcher must not be taken for Git Bash: kind=%s err=%v", kind, err)
+	}
+	// The owner's word, from the setting or the environment, beats the default.
+	prev := ShellPreference
+	t.Cleanup(func() { ShellPreference = prev })
+	ShellPreference = func() string { return "powershell" }
+	if _, kind, _ := platformShellArgvFor("windows", "Get-Item .", none, both); kind != hostShellPwsh {
+		t.Fatalf("shell = powershell: kind=%s", kind)
+	}
+	env := func(k string) string {
+		if k == RemedyShellEnv {
+			return "bash"
+		}
+		return ""
+	}
+	if _, kind, _ := platformShellArgvFor("windows", "ls", env, both); kind != hostShellBash {
+		t.Fatalf("REMEDY_SHELL comes before the setting: kind=%s", kind)
+	}
 }

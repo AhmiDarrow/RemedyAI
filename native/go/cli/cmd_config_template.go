@@ -170,6 +170,7 @@ claimidx_public_ledger = false
 # harness_mode = "auto"     # auto | off (keep a long conversation inside the model window)
 # harness_min_context_pct = 0.75
 # harness_max_context_pct = 0.92
+# shell = "auto"            # auto | bash | powershell | cmd (Windows: the shell her bash tool runs; auto is Git Bash when installed)
 # finish_checks = "auto"    # auto | all | off (send her back to work after a reply that looks unfinished;
 #                           # auto does it for small local models, and for others only when a check failed)
 
