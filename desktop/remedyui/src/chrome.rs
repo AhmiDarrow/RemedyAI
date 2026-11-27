@@ -1793,7 +1793,7 @@ mod tests {
             &[("version", VERSION.into())],
         );
         let about = about.replace(['\u{2068}', '\u{2069}'], "");
-        assert_eq!(about, "About Remedy (v1.1.0)");
+        assert_eq!(about, "About Remedy (v2.0.0)");
     }
 
     #[test]
