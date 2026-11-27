@@ -4,6 +4,45 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-26
+
+### Added
+- A full set of commands, about sixty: every setting (`/settings`, `/set`, `/get` and shortcuts such as `/theme`, `/web`, `/approvals`), the model side (`/usage`, `/context`, `/providers`, `/tools`), memory (`/forget`), her own work (`/routines`, `/jobs`, `/notifications`) and this PC (`/connect`, `/voice`, `/doctor`, `/version`, `/update`). `/commands` lists them and `/help <command>` explains one. The apps' command list now holds only commands that do something.
+- Slash commands work wherever you type: Grove on the desktop and on a paired phone now carries a command out instead of sending it to Remedy as a message. New or made real: `/model` (show, list, or switch with part of a name), `/stop`, `/status`, `/think`, `/search`, `/rename`, `/remember`, `/goal`, `/goals`, `/plan` (show, approve, cancel), `/plans`, `/approve`, `/deny`, `/whoami`. A phone can do by command only what its panes in Connect settings allow.
+- Settings → Connect → Get the phone app shows a QR code that downloads the Android app from the latest release.
+- A setting for whether a messenger chat joins the conversation open on your PC (Advanced, Messengers; on by default). Turn it off if anyone but you is on a messenger allow list.
+
+### Changed
+- Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), compaction starts near 88% of the model's real context window, job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
+- The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
+- One version number, 2.0.0, for the desktop, the phone app, the runtime and the command line.
+- The `remedy` command line runs in the Go runtime. The Python package is now only a small launcher for it with no dependencies; the rest of the Python code is gone. `remedy-mcp` is the same as `remedy mcp serve`.
+
+### Fixed
+- Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
+- A number typed into Settings (retention days, for one) was dropped on save and the default came back.
+- Emoji drew as scattered pieces on Windows. The engine took the system's emoji font ahead of Remedy Emoji and painted its layers in the wrong places. Remedy Emoji now draws them, and the system's font, still used for flags, is painted correctly.
+- Chat text in Studio and Grove can be selected with the mouse and copied.
+- The Files rail could not leave the project: the parent-folder button was off at the project root, and a folder opened outside the project led back into it. It now goes up to the drive, opens folders anywhere the access setting allows, and has a row of places (the project, Desktop, Documents, Downloads, and with full access the home folder and every drive). A folder with more than 1,000 items says it is showing the first 1,000 (it was 200, silently).
+- After the chat or actions pane was popped out and docked back, the other pane was gone: it kept the whole width it took while alone.
+- The main window could start as a sliver that could not be resized after it was closed while minimized. It now has a smallest size and opens at a normal one.
+- Desktop 1.0.0 stayed on "Connecting to local server" because the installer never shipped `remedy-runtime` or `remedy_core`, and the shell did not look for `remedy-runtime.exe` on Windows. Both are packed next to the app again, and a missing binary fails the splash immediately instead of waiting ~90s.
+- The Windows tray icon is the Remedy mark from 0.70.5 (`tray-icon.png` / `icon.ico`) again, not a solid forest-green square.
+- Web search uses the local search engine again. Since the runtime stopped starting Python nothing started the engine, so every search fell back to a page that often answers with a human check. The runtime now downloads, verifies and starts it itself, and stops it when web tools are off.
+- A local model whose context filled up lost all of its file and shell tools: the short tool list it was given named tools that no longer exist.
+- WSL bash works inside a project folder (it was refused outright). Commands run through `wsl` are now held to the project folder like any other, which they were not when written inside another command.
+- On Windows a folder junction could lead file tools, the media route and shell commands into the secrets folder. All three now follow where the path really goes.
+- The local tool API ran shell commands in Auto without the checks a chat turn gets.
+- A PowerShell or cmd command nested inside another command could write outside the project folder.
+- Opening a file from the Files rail could run part of its name as a command (a file named `x&calc.txt`). Open terminal and the Web UI link had the same kind of weakness.
+- Killing a background job now answers once the job has really stopped, with its exit code.
+
+### Security
+- New safeguards, each with a setting and documented in `docs/SECURITY.md`: in Auto mode a shell command that names a key file, reaches outside the project, contacts the network or is built while it runs waits for approval (`shell_in_auto`); a web fetch whose address could carry data out waits (`web_fetch_guard`); other agents and messenger senders may use only tools that show nothing of the owner's until the owner allows more (`peer_tools`, `messenger_tools`); the local API caps one request body (`api_max_body_mb`).
+- A routine or background job created because someone outside asked keeps that standing: it asks before every change, however much later it runs.
+- File tools refuse Remedy's secrets folder also when the project folder contains it, and searches never walk into it.
+- "Just this once" now lets the approved call run instead of asking a second time.
+
 ## [0.70.5] - 2026-11-20
 
 ### Fixed
