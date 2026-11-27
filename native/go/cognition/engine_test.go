@@ -296,8 +296,9 @@ func TestEngineStopsRepeatedNoProgressAndToolCeilings(t *testing.T) {
 }
 
 func TestEngineRepeatGateNudgesOnceThenStops(t *testing.T) {
-	// Design 2.6: an identical batch three times gets one nudge; identical
-	// again ends the turn. The refused batch never runs.
+	// The same batch with the same result runs four times; the next three
+	// requests are refused with a nudge, and one more ends the turn. A refused
+	// batch never runs.
 	var rounds atomic.Int32
 	var executed atomic.Int32
 	engine := Engine{
@@ -318,14 +319,46 @@ func TestEngineRepeatGateNudgesOnceThenStops(t *testing.T) {
 	if !errors.Is(out.Err, ErrNoProgress) {
 		t.Fatalf("want ErrNoProgress, got %v after %d rounds", out.Err, rounds.Load())
 	}
-	if rounds.Load() != 4 {
-		t.Fatalf("want three identical batches, one nudge, then a stop: rounds=%d", rounds.Load())
+	if rounds.Load() != 8 {
+		t.Fatalf("want four identical runs, three nudges, then a stop: rounds=%d", rounds.Load())
 	}
-	if executed.Load() != 2 {
-		t.Fatalf("the nudged batch must not run: executed=%d", executed.Load())
+	if executed.Load() != 4 {
+		t.Fatalf("a nudged batch must not run: executed=%d", executed.Load())
 	}
 	if !strings.Contains(transcriptText(out.Messages), "[Nudge]") {
 		t.Fatalf("nudge missing from the transcript: %s", transcriptText(out.Messages))
+	}
+}
+
+func TestRepeatGateLetsChangingResultsAndWatchingThrough(t *testing.T) {
+	run := func(name string, result func(n int32) string) Outcome {
+		var rounds, executed atomic.Int32
+		engine := Engine{
+			Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+				if rounds.Add(1) > 12 {
+					return events(ModelEvent{Text: "done", Done: true}), nil
+				}
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "c", Name: name, Input: []byte(`{"id":"j1"}`)}}), nil
+			}),
+			Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+				return ToolResult{ID: c.ID, Name: c.Name, Output: []byte(result(executed.Add(1)))}
+			}),
+			Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+			Config: Config{MaxIterations: 40, SoftEpochSteps: -1},
+		}
+		out := engine.Run(context.Background(), "wait for it")
+		if executed.Load() != 12 {
+			t.Fatalf("%s: every call should run, ran %d", name, executed.Load())
+		}
+		return out
+	}
+	// The same call whose result keeps changing is progress.
+	if out := run("bash", func(n int32) string { return fmt.Sprintf("line %d", n) }); out.Err != nil {
+		t.Fatalf("changing results: %v", out.Err)
+	}
+	// Watching a job that has nothing new yet is the tool's purpose.
+	if out := run("jobs", func(int32) string { return "running" }); out.Err != nil {
+		t.Fatalf("watching: %v", out.Err)
 	}
 }
 
@@ -420,7 +453,7 @@ func TestEngineDefaultCeilingsAreBuildScale(t *testing.T) {
 	if got := defaultMaxResultChars(SmallContextWindow); got != LocalMaxResultChars {
 		t.Fatalf("local result cap=%d want %d", got, LocalMaxResultChars)
 	}
-	if cfg.MaxRepeatedBatch != 2 || cfg.RepeatNudgeBudget != 1 {
+	if cfg.MaxRepeatedBatch != 3 || cfg.RepeatNudgeBudget != 3 {
 		t.Fatalf("repeat gate = %d batches / %d nudges", cfg.MaxRepeatedBatch, cfg.RepeatNudgeBudget)
 	}
 }
@@ -429,8 +462,10 @@ func TestTranscriptBudgetFromContextWindow(t *testing.T) {
 	if got := transcriptBudget(0); got != int(float64(DefaultContextWindow)*promptBudgetFraction)-16_000 {
 		t.Fatalf("cloud budget=%d", got)
 	}
-	if got := transcriptBudget(8192); got != 2048 {
-		t.Fatalf("small local window budget=%d want the window/4 floor", got)
+	// A small window keeps a quarter of itself for the reply, not the fixed
+	// 16,000 that is larger than the whole window.
+	if got := transcriptBudget(8192); got != 7208-2048 {
+		t.Fatalf("small local window budget=%d", got)
 	}
 }
 
@@ -914,7 +949,7 @@ func TestEngineNudgeRoundKeepsObservations(t *testing.T) {
 			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("body")}
 		}),
 		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
-		Config: Config{MaxIterations: 20, SoftEpochSteps: -1, MaxRepeatedBatch: 2, RepeatNudgeBudget: 1, MaxRearms: 1},
+		Config: Config{MaxIterations: 20, SoftEpochSteps: -1, MaxRepeatedBatch: 1, RepeatNudgeBudget: 1, MaxRearms: 1},
 		ContinueGate: func(_ context.Context, _ Turn, _ int, last []ToolResult, _ bool) (bool, string) {
 			if len(last) != 1 || last[0].Name != "workspace.read" {
 				t.Fatalf("gate must see the last results, got %#v", last)
@@ -1299,7 +1334,7 @@ func TestElideStubsMiddleResultsAndKeepsTheTail(t *testing.T) {
 }
 
 func TestEngineElidesWhenThatFits(t *testing.T) {
-	fat := strings.Repeat("FAILURE DETAIL the assertion wanted 1 got 0\n", 200)
+	fat := strings.Repeat("FAILURE DETAIL the assertion wanted 1 got 0\n", 800)
 	msgs := []Message{UserText("make the suite green")}
 	msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
 		{Type: BlockToolUse, ID: "fat", Name: "shell.exec", Input: json.RawMessage(`{"argv":["go","test"]}`)},
@@ -1454,6 +1489,7 @@ func TestNativeAssistantTurnIsCarriedIntoTheNextRound(t *testing.T) {
 		t.Fatal("stripNative clears the native copy")
 	}
 }
+
 // A panicking tool executor fails its own call; it must not crash the
 // process the runtime shares with every other turn.
 func TestEngineToolPanicBecomesToolError(t *testing.T) {

@@ -1,7 +1,6 @@
 package prompt
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -203,10 +202,8 @@ func runtimeInfo(b binding, maxSteps int) string {
 		"Connected model: " + b.Model + "\n" +
 		"API base URL: " + b.BaseURL + "\n" +
 		"Operating mode: run until the task is finished — keep using tools for " +
-		"coding/project work across as many steps as needed " +
-		"(pathological-loop safety ceiling: " + strconv.Itoa(maxSteps) + "). " +
-		"Soft epochs only compact context; they are not a stop or tool budget.\n" +
-		"Do not stop mid-task to summarize or because of step pressure.\n" +
+		"coding/project work across as many steps as needed. " +
+		"There is no step budget, and a long conversation is compacted for you.\n" +
 		"When asked which provider/model you use, answer from this block — do not call tools.\n" +
 		reactionGuideline
 }

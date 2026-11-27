@@ -235,11 +235,19 @@ func (c *webClient) executeFetch(ctx context.Context, request Request) (Result, 
 		return Result{}, errors.New("url must start with http:// or https://")
 	}
 	limit := clampMaxChars(body.MaxChars)
-	finalURL, raw, charset, err := c.politeFetch(ctx, target, max(limit*4, 200_000), webFetchTimeout, c.robotsRespected())
+	rawCap := max(limit*4, 200_000)
+	finalURL, raw, charset, err := c.politeFetch(ctx, target, rawCap, webFetchTimeout, c.robotsRespected())
 	if err != nil {
 		return Result{}, err
 	}
-	raw2, err := json.Marshal(shapeFetch(target, finalURL, raw, charset, limit))
+	shaped := shapeFetch(target, finalURL, raw, charset, limit)
+	if len(raw) >= rawCap {
+		// The page itself was longer than what was downloaded: say so even
+		// when the text made from the downloaded part fits.
+		shaped["truncated"] = true
+		shaped["note"] = fmt.Sprintf("Only the first %d bytes of this page were downloaded; the rest is missing.", rawCap)
+	}
+	raw2, err := json.Marshal(shaped)
 	return Result{Output: raw2}, err
 }
 

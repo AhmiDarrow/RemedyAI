@@ -127,21 +127,31 @@ func truncStr(s string, n int) string {
 	return s[:n] + fmt.Sprintf("\n…[truncated %d chars]", len(s)-n)
 }
 
+// A turn carries the conversation itself, not a short tail of it: the engine
+// trims and compacts to the model's window, which it knows and this does not.
+// These only bound what is loaded.
 const (
-	turnHistoryMessages     = 12
-	turnHistoryContentChars = 4_000
+	// turnHistoryMessages is the least a long session carries; the most is
+	// that plus one block, less one.
+	turnHistoryMessages = 200
+	// turnHistoryBlock is how many messages the window's start moves by.
+	turnHistoryBlock = 20
+	// turnHistoryContentChars cuts one earlier message, with a marker.
+	turnHistoryContentChars = 16_000
+	// turnHistoryChars is the most earlier text a turn loads (about 60k
+	// tokens); past it whole blocks leave from the front.
+	turnHistoryChars = 240_000
 )
 
 // turnHistoryWindow is how many of a session's total messages a turn carries.
-// The window's first message moves only every turnHistoryMessages messages,
-// not on every turn: a provider caches a request by prefix, so a window that
-// slid by two each turn made it re-read the whole history every time. The
-// result is between turnHistoryMessages and twice that, less one.
+// The window's first message moves a block at a time, not on every turn: a
+// provider caches a request by prefix, so a window that slid by two each turn
+// made it re-read the whole history every time.
 func turnHistoryWindow(total int) int {
 	if total <= turnHistoryMessages {
 		return turnHistoryMessages
 	}
-	start := (total - turnHistoryMessages) / turnHistoryMessages * turnHistoryMessages
+	start := (total - turnHistoryMessages) / turnHistoryBlock * turnHistoryBlock
 	return total - start
 }
 
@@ -163,11 +173,34 @@ func (s *Server) turnHistory(sid string) []map[string]any {
 	if s == nil || s.sessions == nil {
 		return nil
 	}
-	msgs, err := s.sessions.ListMessages(sid, turnHistoryWindow(s.sessions.countMessages(sid)), 0)
+	total := s.sessions.countMessages(sid)
+	msgs, err := s.sessions.ListMessages(sid, turnHistoryWindow(total), 0)
 	if err != nil {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(msgs))
+	// Over the text budget, whole blocks leave from the front (so the start
+	// still moves rarely); the newest block always stays.
+	size := 0
+	for _, m := range msgs {
+		c, _ := m.Content.(string)
+		size += min(len(c), turnHistoryContentChars)
+	}
+	for size > turnHistoryChars && len(msgs) > turnHistoryBlock {
+		for _, m := range msgs[:turnHistoryBlock] {
+			c, _ := m.Content.(string)
+			size -= min(len(c), turnHistoryContentChars)
+		}
+		msgs = msgs[turnHistoryBlock:]
+	}
+	out := make([]map[string]any, 0, len(msgs)+1)
+	if hidden := total - len(msgs); hidden > 0 && len(msgs) > 0 {
+		// Said, not silent: she should know the conversation is longer than
+		// what she can see.
+		out = append(out, map[string]any{
+			"role":    "user",
+			"content": fmt.Sprintf("[%d earlier messages of this conversation are not shown here.]", hidden),
+		})
+	}
 	for _, m := range msgs {
 		content, _ := m.Content.(string)
 		content = truncStr(content, turnHistoryContentChars)

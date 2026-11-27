@@ -196,7 +196,6 @@ func sysRunWizard(c *Ctx, opts sysSetupOpts) (code int) {
 	sysConfigureSkills(c, p, cfg, opts.quick, opts.skipSkills)
 
 	cfg["gateway"] = map[string]any{"heartbeat_interval": 60, "rate_limit": 120}
-	cfg["execution"] = map[string]any{"default_timeout": 30, "max_retries": 3, "retry_backoff": 1.0}
 	cfg["setup_completed"] = true
 
 	sysRule(c, "Review")

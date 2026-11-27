@@ -19,11 +19,29 @@ steps:
    replaced by one working-set note: files read and changed, commands run and
    their results, open to-dos.
 
-Each tool result is also capped when it arrives (30,000 characters on a large
+Each tool result is also capped when it arrives (100,000 characters on a large
 window, 8,000 on a small local one), so a single dump cannot fill the window.
+
+A round of several large results is capped as a whole (a quarter of the
+compaction budget), and a cut is always marked in the text Remedy sees.
+
+A turn starts with the conversation so far: up to about 200 earlier messages.
+In a longer conversation the oldest are left out and Remedy is told how many.
 
 All of this runs inside the Remedy runtime on your computer. Nothing is sent
 anywhere to do it.
+
+## Sending her back to work
+
+After a reply with no tool calls, a few checks can send Remedy back to work
+(files changed and nothing was run to check them, a check failed, she said she
+would do something and did not). `finish_checks` in `config.toml` sets when:
+
+| Value | What happens |
+|---|---|
+| `auto` (default) | Every check for a small local model. For a larger model only one: a check failed and the reply says the work is done. |
+| `all` | Every check for every model. |
+| `off` | None. |
 
 ## The setting
 
