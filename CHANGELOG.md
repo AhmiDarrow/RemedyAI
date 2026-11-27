@@ -26,6 +26,8 @@ All notable changes to Remedy are documented here.
 - Desktop, Documents and Downloads were looked for under the home folder by name, so a Desktop that Windows keeps elsewhere (under OneDrive, say) was missing from the Files rail and from what Remedy may read. Their places now come from the system, on Linux from `user-dirs.dirs`.
 - A theme picked in Settings changed only some of the window until a restart. The whole window now takes it at once.
 - The edges of the side panes and of the chat split did not show that they can be dragged. They are a clearer line now, light up under the pointer, and the pointer becomes a resize arrow.
+- The chat no longer lets go of the newest message on its own. Only scrolling up, dragging the bar or pressing Up, Page Up or Home does; sending a message, opening a conversation, End or Latest take hold again.
+- The "Turn finished" desktop notification appears only when the Remedy window is not in front.
 - The pairing code in Settings was cut off at the edge of the panel and could not be scanned. A code now shrinks to fit the space it has.
 - Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
 - A number typed into Settings (retention days, for one) was dropped on save and the default came back.
