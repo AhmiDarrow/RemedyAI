@@ -17,7 +17,7 @@ func TestBoundaryCheckerFindsForbiddenAndMisownedImports(t *testing.T) {
 		}
 	}
 	write("runtime/good.go", "package runtime\nimport \"context\"\n")
-	write("runtime/bad.go", "package runtime\nimport (\"os/exec\"; _ \"github.com/Microsoft/go-winio\")\n")
+	write("runtime/bad.go", "package runtime\nimport \"os/exec\"\n")
 	write("cmd/bad/main.go", "package main\nimport \"unsafe\"\n")
 	write("secret/ok_unsafe.go", "package secret\nimport \"unsafe\"\nvar _ = unsafe.Sizeof(0)\n")
 	write("core/ok_unsafe.go", "package core\nimport \"unsafe\"\nvar _ = unsafe.Sizeof(0)\n")
@@ -32,7 +32,7 @@ func TestBoundaryCheckerFindsForbiddenAndMisownedImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(violations, "\n")
-	if !strings.Contains(joined, "forbidden os/exec") || !strings.Contains(joined, "owned by ipc") || !strings.Contains(joined, "cmd/bad/main.go imports forbidden unsafe") {
+	if !strings.Contains(joined, "forbidden os/exec") || !strings.Contains(joined, "owned by connect") || !strings.Contains(joined, "cmd/bad/main.go imports forbidden unsafe") {
 		t.Fatalf("violations=%v", violations)
 	}
 	if !strings.Contains(joined, "memory/bad_sqlite.go imports modernc.org/sqlite owned by httpapi") {

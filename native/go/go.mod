@@ -3,7 +3,6 @@ module github.com/AhmiDarrow/RemedyAI/native/go
 go 1.25.0
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/ebitengine/purego v0.11.0
 	github.com/google/uuid v1.6.0

@@ -8,7 +8,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Layer | Path | Role |
 |-------|------|------|
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
-| Python workers | `src/remedy/` | RMDY tool worker, ReAct/ML helpers — **not** production `:7400` |
+| Python package | `src/remedy/` | The `remedy` command line and older library code. The runtime starts no Python and the installers ship none |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
@@ -16,7 +16,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
 | Gateway | `native/go/gateway/` + `native/go/httpapi` (SSOT `messenger_catalog.json`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema via embedded JSON; Python `messenger_settings` loads that fixture fail-closed for TestClient/scrub/CLI only (no catalog twin; no adapter/router/session_bridge; no `/api/webhooks*` registrar) |
-| Native runtime | `native/` | Go runtime and Zig capability core. Python workers cover model, voice, and vision |
+| Native runtime | `native/` | Go runtime and Zig capability core. Speech runs in the Rust `remedy-voice` helper; the image model and the local search engine are downloaded, verified and supervised by the runtime |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 | Peer interop | `src/remedy/interop/` + `native/go/httpapi/interop.go` | A2A v1.0 and MCP talk-to-Remedy. Peers, not muscles. Inbound off / localhost / token by default. See `docs/AGENT_INTEROP.md`. |
 
@@ -28,10 +28,9 @@ packages on a `v*` tag (`.github/workflows/desktop-release.yml`), and
 
 ## Native boundary
 
-`native/protocol/` defines the versioned binary frame shared across languages.
-`native/go/` owns supervised runtime lifecycle, local IPC, deterministic ReAct
-state, the Tool ABI, durable state/events/memory, scheduling, scoped agents, and
-replaceable Python workers. `native/zig/` exports a small C ABI and independently
+`native/go/` owns supervised runtime lifecycle, deterministic ReAct state, the
+Tool ABI, durable state/events/memory, scheduling, scoped agents and the native
+helpers. `native/zig/` exports a small C ABI and independently
 checks capabilities before machine-facing execution.
 
 `src/remedy/runtime/native_runtime.py` is the Zig/Go probe seam for capability
@@ -44,7 +43,7 @@ allowed only for operations declared idempotent.
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
 packaged Desktop launch that binary (fail closed if missing). Python does not
 start uvicorn on `:7400`; FastAPI `create_app` / `interfaces.api` are deleted; Go httpapi owns `:7400`.
-`python -m remedy.runtime.rmdy_tool_worker` is the RMDY worker entry. Startup
+There is no Python worker. Startup
 performs one bounded readiness probe only when native mode is requested; the
 liveness route remains probe-free. Native durability requires contiguous event
 replay and rollback-safe appends; native cancellation cannot be overwritten or
@@ -69,7 +68,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 ## Core control plane
 
 - **ReAct (production)** — Go `native/go/cognition/` driven by `remedy-runtime` / `native/go/httpapi` (`CognitionTurnRunner`). Desktop, `remedy serve`, messenger turns, and hive forager pulses use this path on `:7400`. The turn is an **append-only transcript** (`cognition.Message` / `Block`): round N still carries round 1's tool output, prior session turns, and attachments as image/text blocks. Over budget, `compact.go` replaces the middle with one deterministic working set (files touched, commands with exit codes, last failing check, TODO, decisions) and keeps the goal plus the recent tail.
-- **Model surface** — the model is advertised `read, edit, write, glob, grep, bash, jobs, todo, screenshot, delegate` plus `computer.*` / `clipboard.*` and, with the Python worker attached, `web.*` / `memory.*` / `skill.*` / `mail.*` / `calendar.*`. The internal ids (`workspace.*`, `shell.exec`, demo tools) stay registered for the CLI and tests but are hidden through `tools.IsModelHiddenTool`. Approvals are fingerprinted on the **Tool ABI id**, never the provider's wire name.
+- **Model surface** — the model is advertised `read, edit, write, glob, grep, bash, jobs, todo, screenshot, delegate` plus `computer.*` / `clipboard.*`, `web.*` / `memory.*` / `skill.*` / `mail.*` / `calendar.*`. The internal ids (`workspace.*`, `shell.exec`, diagnostics) stay registered for the CLI and tests but are hidden through `tools.IsModelHiddenTool`. Approvals are fingerprinted on the **Tool ABI id**, never the provider's wire name.
 - **Turn log / evidence** — every streamed turn writes `<home>/sessions/<sid>/turns/<request_id>.jsonl`: full tool output, images beside it, usage, approvals, one monotonic `seq` per frame. `GET …/stream/attach` replays it and then tails the live turn, so a reload rejoins work in progress; `GET …/turns/{request_id}/tools/{call_id}` serves the complete result behind the short SSE preview. Pruned per turn (40 newest per session, 30 days).
 - **Providers** — `providers.Anthropic` (official SDK: prompt caching with an explicit stable/volatile system split, adaptive thinking, effort, images, `stop_reason`, usage) and `providers.OpenAICompat` for everything else. Both implement `ToolAdvertiser`, which is the runner's single seam for pushing the tool surface.
 - **ReAct (Python helpers)** — `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`, `llm_api_errors.py` remain for workers/tests. The Python `react_loop` package is **deleted**; BasicRuntime/`remedy chat` fail closed toward Go. CLI `remedy tool` uses Go `GET /api/tools` + `POST /api/tools/invoke` (no BasicRuntime).

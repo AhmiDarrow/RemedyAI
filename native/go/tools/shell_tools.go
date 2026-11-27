@@ -187,10 +187,15 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 			return Result{}, fmt.Errorf("%w: wsl:true is only available on Windows", ErrInvalidInput)
 		}
 		command = rewriteWindowsPathsForWSL(command)
+		// wsl.exe itself starts in the Windows folder, which is what the
+		// write jail checks; only its --cd takes the /mnt/<drive> spelling.
+		// Handing the spawn the /mnt path refused every WSL command in a
+		// bound project.
+		wslCwd := ""
 		if cwd != "" {
-			cwd = windowsPathToWSL(cwd)
+			wslCwd = windowsPathToWSL(cwd)
 		}
-		argv, err = wslArgvFor(command, cwd, lookPath)
+		argv, err = wslArgvFor(command, wslCwd, lookPath)
 		if err != nil {
 			return Result{}, err
 		}
@@ -377,7 +382,12 @@ func startBackgroundJob(ctx context.Context, spec shellSpawnSpec, command, home,
 	}
 	// The job outlives this tool call by design, so it is reaped on its own
 	// goroutine and never on the call's context.
-	go superviseJob(dir, record, proc, logFile)
+	done := make(chan struct{})
+	jobDone.Store(id, done)
+	go func() {
+		defer func() { jobDone.Delete(id); close(done) }()
+		superviseJob(dir, record, proc, logFile)
+	}()
 
 	payload := map[string]any{
 		"job_id":   id,
@@ -394,6 +404,10 @@ func startBackgroundJob(ctx context.Context, spec shellSpawnSpec, command, home,
 	out, err := json.Marshal(payload)
 	return Result{Output: out}, err
 }
+
+// jobDone holds a channel per running job, closed once its supervisor has
+// closed the log and written the final record.
+var jobDone sync.Map
 
 // superviseJob streams the child's output into the job log, waits for it and
 // records the outcome.
@@ -652,6 +666,20 @@ func killJob(dir, id string) (Result, error) {
 	record.EndedMS = time.Now().UnixMilli()
 	if err := writeJobRecord(dir, record); err != nil {
 		return Result{}, err
+	}
+	// Wait for the supervisor to close the log and write the final record, so
+	// the answer carries the exit code and nothing is still writing to the
+	// job folder once the kill returns.
+	if ch, ok := jobDone.Load(record.ID); ok {
+		select {
+		case <-ch.(chan struct{}):
+			jobStateMu.Lock()
+			if final, rerr := readJobRecord(dir, record.ID); rerr == nil {
+				record = final
+			}
+			jobStateMu.Unlock()
+		case <-time.After(5 * time.Second):
+		}
 	}
 	out, err := json.Marshal(map[string]any{"action": "kill", "job": jobPublic(record)})
 	return Result{Output: out}, err

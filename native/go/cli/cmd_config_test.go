@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -144,7 +145,7 @@ func TestCLIConfigShowRedactsSecretShapedValues(t *testing.T) {
 			t.Fatalf("config show printed %q:\n%s", leak, r.out)
 		}
 	}
-	for _, want := range []string{`"[redacted]"`, `"channel_id": "C1"`, `"empty_token": ""`, `"home_dir": "` + home + `"`} {
+	for _, want := range []string{`"[redacted]"`, `"channel_id": "C1"`, `"empty_token": ""`, `"home_dir": ` + cfgJSONString(t, home)} {
 		if !strings.Contains(r.out, want) {
 			t.Fatalf("config show lacks %s:\n%s", want, r.out)
 		}
@@ -613,4 +614,14 @@ func TestCLIJSONKeepsPythonFloats(t *testing.T) {
 			t.Fatalf("%s lacks %s", raw, want)
 		}
 	}
+}
+
+// cfgJSONString is s as JSON prints it (a Windows path has its backslashes doubled).
+func cfgJSONString(t *testing.T, s string) string {
+	t.Helper()
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }

@@ -1970,11 +1970,13 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 	return spawnShellUnderJail(roots, spec.argv, spec.cwd, spec.env, token, false, nowMS)
 }
 
-// spawnNamesSecret reports a word of the command that is an existing path
-// into the auth secrets once links and junctions are resolved. The core reads
-// the spelling only, so `findstr . link/token` through a junction printed the
-// file. A filter, like the rest of the shell checks: it sees the paths the
-// command names, not the ones a program computes.
+// spawnNamesSecret reports a word of the command that, read as a path from
+// the command's folder, leads into the auth secrets once links and junctions
+// are resolved. The core reads the spelling only, so `findstr . link/token`
+// through a junction printed the file, and a bare `auth/token` run from the
+// Remedy home named no home at all. A filter, like the rest of the shell
+// checks: it sees the paths the command names, not the ones a program
+// computes.
 func spawnNamesSecret(argv []string, cwd string) bool {
 	if cwd != "" && isSecretAuthPath(cwd) {
 		return true
@@ -1990,7 +1992,7 @@ func spawnNamesSecret(argv []string, cwd string) bool {
 				}
 				w = filepath.Join(cwd, w)
 			}
-			if _, err := os.Lstat(w); err == nil && isSecretAuthPath(w) {
+			if isSecretAuthPath(w) {
 				return true
 			}
 		}
