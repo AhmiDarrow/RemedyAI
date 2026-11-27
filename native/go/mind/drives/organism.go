@@ -63,7 +63,10 @@ type Report struct {
 	BeliefsAdded int           `json:"beliefs_added"`
 	Compact      Compacted     `json:"compact"`
 	Idle         string        `json:"idle"`
-	Changed      bool          `json:"changed"`
+	// SkillsRefined is how many learned skills the caller's lifecycle tick
+	// changed this tick (it feeds the drives, not Changed).
+	SkillsRefined int  `json:"skills_refined,omitempty"`
+	Changed       bool `json:"changed"`
 }
 
 // ChangedMap is the learn-log "changed" field: only what really changed.
@@ -84,6 +87,9 @@ func (r Report) ChangedMap() map[string]any {
 	if r.Idle != "" {
 		out["idle"] = r.Idle
 	}
+	if r.SkillsRefined > 0 {
+		out["skills_refined"] = r.SkillsRefined
+	}
 	return out
 }
 
@@ -91,8 +97,13 @@ func (r Report) ChangedMap() map[string]any {
 // drift the drives. Changed is true only when a dream ran or a store was
 // trimmed (a cooldown skip is not a change), so the learn clock backs off.
 // Every sub-step runs even when another fails; errors are joined.
-func OrganismTick(env soul.Env) (Report, error) {
-	var r Report
+func OrganismTick(env soul.Env) (Report, error) { return OrganismTickWith(env, 0) }
+
+// OrganismTickWith is OrganismTick after a learned-skill lifecycle tick that
+// changed skillsRefined skills: as in _organism_tick, that counts as heavy
+// work and builds competence.
+func OrganismTickWith(env soul.Env, skillsRefined int) (Report, error) {
+	r := Report{SkillsRefined: max(0, skillsRefined)}
 	var errs []error
 	f, err := soul.Load(env)
 	if err != nil {
@@ -114,7 +125,7 @@ func OrganismTick(env soul.Env) (Report, error) {
 	if r.Compact, err = Compact(env); err != nil {
 		errs = append(errs, err)
 	}
-	in := TickInput{Heavy: r.Dreamed, Dreamed: r.Dreamed}
+	in := TickInput{Heavy: r.Dreamed || r.SkillsRefined > 0, Dreamed: r.Dreamed, SkillsRefined: r.SkillsRefined}
 	if f != nil && f.Relational.LastUserTS > 0 {
 		h := (sf.Unix(env.Now()) - f.Relational.LastUserTS) / 3600
 		in.HoursSinceUser = &h

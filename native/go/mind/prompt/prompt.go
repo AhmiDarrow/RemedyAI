@@ -126,11 +126,19 @@ var notPortedOps = map[string][]string{
 	// Build-engine state, the per-turn gate tracker, mission / brief open
 	// work and the react_policy completion heuristics.
 	OpShouldContinue: {"should_continue:build_state", "should_continue:gate_tracker", "should_continue:missions", "should_continue:heuristics"},
-	// Metabolism evidence ledger (in-process) and the learn log.
+	// The metabolism evidence ledger. Retired, not pending: the ledger was
+	// per-process Python state and its evidence/<session>.jsonl index has no
+	// reader, so the Go runtime sets no after-tool-batch hook.
 	OpAfterToolBatch: {"after_tool_batch:metabolism"},
-	// Post-turn prep, CAS residue, skill genome, the nanoswarm pattern
-	// buffer, the LearningLoop and alive outcomes.
-	OpTurnEnd: {"turn_end:metabolism", "turn_end:skill_genome", "turn_end:learning_loop", "turn_end:alive_outcome"},
+	// The turn end runs natively in httpapi (CognitionTurnRunner.
+	// scheduleTurnEnd), not as this operation: the soul update, skill
+	// learning and grading plus the learned-skill lifecycle tick
+	// (mind/learn), memory consolidation, and the alive outcome
+	// (mind/drives). What is left is retired, not pending: the metabolism's
+	// time crystal, CAS residue, evidence index, critical verify, session
+	// quality and somatic vitals, and the skill genome's phenotypes, all fed
+	// stores that only a Python turn ever read.
+	OpTurnEnd: {"turn_end:metabolism", "turn_end:skill_genome"},
 }
 
 // Missing is the side-effect-free readiness check: what the Go port cannot

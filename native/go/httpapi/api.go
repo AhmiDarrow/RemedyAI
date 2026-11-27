@@ -136,6 +136,9 @@ type Server struct {
 	hearthCancel context.CancelFunc
 	// innerAct is what Remedy is doing on her own right now: "", "vigil" or "learning".
 	innerAct atomic.Value
+	// skillTickAt is when the learn clock last ran the learned-skill
+	// lifecycle tick (unix nanoseconds; 0 = never).
+	skillTickAt atomic.Int64
 
 	// partner is Remedy's head: children, routines, heartbeat, autopilot.
 	partner *partnerHub
@@ -223,6 +226,9 @@ func New(cfg Config) (*Server, error) {
 			cr.HomeDir = home
 		}
 		cr.PromptSources = serverPromptSources{s}
+		if cr.MemoryDBPath == "" {
+			cr.MemoryDBPath = resolveDBPath(cfg)
+		}
 		if cr.Registry != nil {
 			cr.LiveContext = func(sid string) string {
 				if b := s.bridge(); b != nil {

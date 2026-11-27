@@ -1,0 +1,13 @@
+author: Remedy
+description: "Export fixture: caf\xE9 menus, quotes 'and' colons: yes"
+instructions: "# Fixture Skill\n\nUse this to test exports. \xDCn\xEFcode stays as\
+  \ written in the body.\n\n```python\nprint(\"hi\")\n```"
+name: fixture-skill
+source: remedy-export
+tags:
+- demo
+- export
+- 'yes'
+title: fixture-skill
+type: skill
+version: 2.1.0

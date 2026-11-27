@@ -48,6 +48,8 @@ func FromTurn(t Turn) (Outcome, error) {
 		now = time.Now
 	}
 	steps := normalizeSteps(t.Steps)
+	skillsMu.Lock()
+	defer skillsMu.Unlock()
 	var out Outcome
 	var errs []error
 	// agent.py 1217: an interrupted turn is never learned from, only graded.
@@ -120,31 +122,42 @@ func learnFromToolSteps(skillsDir string, now time.Time, title string, steps []n
 	if tr.title == "" {
 		tr.title = "tool-session"
 	}
+	sk, merged, reason, err := learnTrace(skillsDir, now, tr)
+	if sk == nil {
+		return "", merged, reason, err
+	}
+	return sk.name, merged, reason, err
+}
+
+// learnTrace is LearningLoop.learn_from_trace (learning_loop.py 142-270): the
+// gate, reflection, merge-or-write. It returns the skill written or merged
+// into (nil when none) and the lifecycle decision's reason either way.
+func learnTrace(skillsDir string, now time.Time, tr trace) (*skill, bool, string, error) {
 	if len(tr.steps) < minSteps {
-		return "", false, "Trace too short for reflection", nil
+		return nil, false, "Trace too short for reflection", nil
 	}
 	eff := computeEffort(tr.toNSteps())
 	patterns := extractSequences(tr.steps)
 	successful := successCount(tr.toNSteps())
 	gate := shouldAcceptTrace(len(tr.steps), successful, tr.successRate(), len(patterns) > 0, tr.title, eff)
 	if gate.action != "accept" {
-		return "", false, gate.reason, nil
+		return nil, false, gate.reason, nil
 	}
 	gs := generate(tr, patterns)
 	if gs == nil {
-		return "", false, "Reflection produced no skill candidate", nil
+		return nil, false, "Reflection produced no skill candidate", nil
 	}
 	conf := math.Max(gate.confidence, reflectionConfidence(tr, patterns))
 
 	if ex, err := readSkill(filepath.Join(skillsDir, safeDirName(gs.name))); err == nil {
 		if merged, reason, err := mergeInto(skillsDir, ex, gs, tr, conf, eff); err != nil {
-			return "", false, "", err
+			return nil, false, "", err
 		} else if merged {
-			return ex.name, true, reason, nil
+			return ex, true, reason, nil
 		}
 		// A library or imported pack is never rewritten (py 594-599). Python then
 		// overwrites it with a fresh probation skill; that is not ported.
-		return "", false, fmt.Sprintf("Skill '%s' is a curated or imported pack; not overwritten", ex.name), nil
+		return nil, false, fmt.Sprintf("Skill '%s' is a curated or imported pack; not overwritten", ex.name), nil
 	}
 
 	status := "discovered"
@@ -156,8 +169,8 @@ func learnFromToolSteps(skillsDir string, now time.Time, title string, steps []n
 		tags = appendOnce(tags, "hard-won")
 	}
 	var sess any
-	if session != "" {
-		sess = session
+	if tr.sessionID != "" {
+		sess = tr.sessionID
 	}
 	sk := &skill{
 		name: gs.name, description: gs.description, version: "0.1.0", status: status, tags: tags, tools: gs.tools,
@@ -181,14 +194,14 @@ func learnFromToolSteps(skillsDir string, now time.Time, title string, steps []n
 	}
 	// validate_metadata (skills/validator.py 56-70): errors refuse the candidate.
 	if strings.TrimSpace(sk.name) == "" {
-		return "", false, "Validation failed: Skill name is missing or empty", nil
+		return nil, false, "Validation failed: Skill name is missing or empty", nil
 	}
 	if utf8Len(sk.description) < 10 {
-		return "", false, "Validation failed: Description must be at least 10 characters", nil
+		return nil, false, "Validation failed: Description must be at least 10 characters", nil
 	}
 	path, err := writeSkill(skillsDir, sk)
 	if err != nil {
-		return "", false, "", err
+		return nil, false, "", err
 	}
 	abs := path
 	if r, err := filepath.EvalSymlinks(path); err == nil {
@@ -207,11 +220,11 @@ func learnFromToolSteps(skillsDir string, now time.Time, title string, steps []n
 		sk.status = "validated"
 		sk.meta.set("lifecycle", "validated-probation")
 		if _, err := writeSkill(skillsDir, sk); err != nil {
-			return "", false, "", err
+			return nil, false, "", err
 		}
 	}
 	reason := fmt.Sprintf("Skill '%s' saved as %s (probation, effort=%s %.2f)", sk.name, sk.status, eff.band(), eff.score)
-	return sk.name, false, reason, nil
+	return sk, false, reason, nil
 }
 
 func utf8Len(s string) int { return len([]rune(s)) }
