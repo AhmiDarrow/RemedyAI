@@ -122,7 +122,7 @@ not a transcript compress.
 - High-confidence facts are injected every turn (size-capped so the model stays sharp).  
 - `/whoami` lists what it knows; `/forget <text>` removes a mistake; `/remember` keeps a fact always ready.  
 - Secrets (API keys, passwords) are **never** auto-stored.  
-- Click the **$** on the usage ticker to hide estimated cost (tokens stay visible).
+- The usage line shows tokens only. Remedy has no price list, so it shows no cost.
 
 You do not need to configure anything. `/remember` is still the explicit pin when
 you want certainty.

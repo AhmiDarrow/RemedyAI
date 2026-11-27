@@ -220,6 +220,9 @@ pub struct Studio {
     pub user_name: Signal<String>,
     /// What the owner calls her (Settings, Partner name). One name for Grove and Studio.
     pub partner_name: Signal<String>,
+    /// Her mood as the runtime decided it ("" until it has said). Every surface
+    /// shows this one, so Grove, Studio and a paired phone agree.
+    pub server_mood: Signal<String>,
     /// When true, this Studio does not talk to a runtime (goldens, tests).
     pub local_only: bool,
     /// Fixed "now" for relative times in previews (Unix seconds).
@@ -349,6 +352,7 @@ impl Studio {
             picker_status: Signal::new(crate::model_picker::PickerStatus::Ready),
             user_name: Signal::new(user.to_string()),
             partner_name: Signal::new("Remedy".into()),
+            server_mood: Signal::new(String::new()),
             local_only,
             clock: Signal::new(None),
             time_travel: crate::timetravel::TimeTravel::new(),
@@ -853,13 +857,14 @@ impl Studio {
         };
         let spoken = body.clone();
         let speak = role == "assistant";
-        let request_id = self
-            .active
-            .get()
-            .and_then(|sid| self.depth.job(&sid).map(|j| j.request_id))
-            .unwrap_or_default();
+        let job = self.active.get().and_then(|sid| self.depth.job(&sid));
+        let request_id = job.as_ref().map(|j| j.request_id.clone()).unwrap_or_default();
+        // The time this part of the reply began, as the runtime will store it.
+        let pinned = self.clock.get().is_some();
+        let created_at = Some(crate::time::rfc3339(job.filter(|_| !pinned).map(|j| j.started_secs).unwrap_or_else(|| self.now())));
         let message = ChatMessage {
             role: role.into(),
+            created_at,
             steps,
             thinking,
             user_reaction: reaction,

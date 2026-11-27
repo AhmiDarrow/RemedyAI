@@ -76,7 +76,7 @@ What that means for accuracy:
   estimate, usually within a few percent for ordinary prose and code.
 - An image is charged a flat 1,500 tokens.
 - The count decides when to trim and compact. **What you are billed is what the
-  provider's API reports**, and that is what **Usage → Usage & Cost** shows.
+  provider's API reports**, and that is what **Usage → Usage** shows.
 
 ## The Harness tab
 

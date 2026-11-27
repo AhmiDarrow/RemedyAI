@@ -3,7 +3,7 @@
 //! Widget code reads these signals. The decisions live in [`logic`].
 
 mod actions;
-mod api;
+pub(crate) mod api;
 pub(crate) mod banners;
 pub(crate) mod composer;
 pub(crate) mod dialogs;
@@ -91,6 +91,9 @@ pub struct StreamJob {
     pub steps: Vec<WorkStep>,
     pub request_id: String,
     pub last_event_ms: i64,
+    /// When this part of the reply began (Unix seconds): the turn's start, or
+    /// the moment a mid-turn message was taken in.
+    pub started_secs: i64,
     pub outgoing: String,
     pub outgoing_files: bool,
     pub held: Vec<Attachment>,
@@ -110,6 +113,7 @@ impl StreamJob {
             steps: Vec::new(),
             request_id: String::new(),
             last_event_ms: now_ms(),
+            started_secs: crate::time::now_secs(),
             outgoing: String::new(),
             outgoing_files: false,
             held: Vec::new(),
@@ -130,8 +134,6 @@ pub struct TodoItem {
 pub struct Usage {
     pub input: u64,
     pub output: u64,
-    /// Dollars, when the runtime sent a cost.
-    pub cost: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -243,7 +245,6 @@ pub struct Depth {
     pub usage_run: Signal<Usage>,
     pub usage_session: Signal<Usage>,
     pub hide_ticker: Signal<bool>,
-    pub hide_cost: Signal<bool>,
     pub todos: Signal<Vec<TodoItem>>,
     pub progress: Signal<Option<f32>>,
     pub stuck: Signal<bool>,
@@ -337,7 +338,6 @@ impl Depth {
             usage_run: Signal::new(Usage::default()),
             usage_session: Signal::new(Usage::default()),
             hide_ticker: Signal::new(false),
-            hide_cost: Signal::new(false),
             todos: Signal::new(Vec::new()),
             progress: Signal::new(None),
             stuck: Signal::new(true),

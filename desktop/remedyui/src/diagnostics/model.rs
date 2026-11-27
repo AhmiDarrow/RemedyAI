@@ -78,7 +78,6 @@ pub(crate) struct ProviderLine {
 pub(crate) struct UsageLine {
     pub provider: String,
     pub tokens: String,
-    pub cost: String,
 }
 
 /// Provider card. `probes` is the joined line, present only when the payload has some.
@@ -210,19 +209,6 @@ pub(crate) fn format_tokens(n: f64) -> String {
 }
 
 /// `formatCost` from `desktop/src/utils/tokenCost.ts`.
-pub(crate) fn format_cost(usd: f64) -> String {
-    if !usd.is_finite() || usd <= 0.0 {
-        return "$0.00".into();
-    }
-    if usd < 0.01 {
-        format!("${usd:.4}")
-    } else if usd < 1.0 {
-        format!("${usd:.3}")
-    } else {
-        format!("${usd:.2}")
-    }
-}
-
 /// `hiveRowLabel`: cadence, status, and the goal clipped at 72 characters.
 pub(crate) fn hive_row_label(row: &HiveRow) -> String {
     let trimmed = row.goal.trim();
@@ -743,7 +729,6 @@ fn providers_from(providers: Option<&Value>) -> Providers {
                 .map(|u| UsageLine {
                     provider: string_field(u, "provider").unwrap_or_else(|| "—".into()),
                     tokens: format_tokens(u.get("total_tokens").and_then(as_f64).unwrap_or(0.0)),
-                    cost: format_cost(u.get("estimated_cost_usd").and_then(as_f64).unwrap_or(0.0)),
                 })
                 .collect()
         })
@@ -1115,17 +1100,6 @@ mod tests {
     }
 
     #[test]
-    fn cost_follows_the_ts_thresholds() {
-        assert_eq!(format_cost(f64::NAN), "$0.00");
-        assert_eq!(format_cost(0.0), "$0.00");
-        assert_eq!(format_cost(-1.0), "$0.00");
-        assert_eq!(format_cost(0.004), "$0.0040");
-        assert_eq!(format_cost(0.01), "$0.010");
-        assert_eq!(format_cost(0.5), "$0.500");
-        assert_eq!(format_cost(1.2), "$1.20");
-    }
-
-    #[test]
     fn hive_label_clips_on_characters_and_untitled() {
         let row = HiveRow {
             id: "a".into(),
@@ -1218,7 +1192,6 @@ mod tests {
         assert_eq!(view.providers.remote.len(), 2);
         assert_eq!(view.providers.local.len(), 1);
         assert_eq!(view.providers.usage[0].tokens, "12k");
-        assert_eq!(view.providers.usage[0].cost, "$1.25");
         assert_eq!(
             view.providers.probes.as_deref(),
             Some("Probes: ollama: 18 ms · lmstudio: fail")

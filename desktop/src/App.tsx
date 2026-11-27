@@ -29,7 +29,6 @@ import { cancelPlan, type TaskPlan } from './api/plans'
 import { LibrarySuggestChip } from './components/LibrarySuggestChip'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import {
-  estimateCostUsd,
   estimateTokensText,
   liveRunEstimate,
   type UsageSnapshot,
@@ -520,7 +519,7 @@ export default function App() {
       prompt_tokens: prompt,
       completion_tokens: completion,
       total_tokens: prompt + completion,
-      estimated_cost_usd: estimateCostUsd(prompt, completion, model, llmProvider),
+      estimated_cost_usd: 0,
       source: 'estimate',
       model,
       provider: llmProvider,

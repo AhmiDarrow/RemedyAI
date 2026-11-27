@@ -24,8 +24,106 @@ thread_local! {
     static STAGE_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
     static INNER: Cell<(u8, u32)> = const { Cell::new((0, 0)) };
     static FACTS: Cell<face_skin::Facts> = const { Cell::new(face_skin::Facts { sessions: 0, messages: 0, days: 0, goals: 0 }) };
+    /// The one stored face of this install, once the app has asked for it
+    /// (`keep_one_face`). Previews and tests leave it unset.
+    static FACE: Cell<Option<Face>> = const { Cell::new(None) };
+    /// The session count the shared use was last counted at.
+    static COUNTED: Cell<u32> = const { Cell::new(u32::MAX) };
     static HOUR_OVERRIDE: Cell<Option<u32>> = const { Cell::new(None) };
     static ENABLED_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+/// Her face as it is stored: who she is (the install's seed) and how far she
+/// has grown (what the two of them did, and what she did alone). Growth only
+/// goes up, so the face changes slowly over time and never flips with which
+/// conversation happens to be open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Face {
+    seed: u64,
+    facts: face_skin::Facts,
+    inner: u32,
+    /// When the seed file was last read (a new seed is how she is made again).
+    seen: std::time::Instant,
+}
+
+fn face_file() -> std::path::PathBuf {
+    crate::grove::remedy_home().join("face.state")
+}
+
+fn read_face() -> Face {
+    let mut face = Face {
+        seed: face_skin::seed().unwrap_or(DESIGN_SEED),
+        facts: face_skin::Facts::default(),
+        inner: 0,
+        seen: std::time::Instant::now(),
+    };
+    if let Ok(text) = std::fs::read_to_string(face_file()) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            let n = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            face.facts = face_skin::Facts { sessions: n("sessions"), messages: n("messages"), days: n("days"), goals: n("goals") };
+            face.inner = n("inner");
+        }
+    }
+    face
+}
+
+fn write_face(face: Face) {
+    let body = serde_json::json!({
+        "sessions": face.facts.sessions, "messages": face.facts.messages,
+        "days": face.facts.days, "goals": face.facts.goals, "inner": face.inner,
+    });
+    let _ = std::fs::write(face_file(), body.to_string());
+}
+
+/// The app's real window calls this once: from here every face on screen is
+/// the stored one. Until the first use is counted it is the face as it was
+/// when the app last closed, not a stand-in.
+pub fn keep_one_face() {
+    FACE.with(|c| c.set(Some(read_face())));
+}
+
+/// The stored face, with a new seed picked up within a few seconds of the
+/// runtime writing one. None in previews and tests.
+fn stored_face() -> Option<Face> {
+    let mut face = FACE.with(|c| c.get())?;
+    if face.seen.elapsed() > std::time::Duration::from_secs(5) {
+        face.seen = std::time::Instant::now();
+        if let Some(seed) = face_skin::seed() {
+            face.seed = seed;
+        }
+        FACE.with(|c| c.set(Some(face)));
+    }
+    Some(face)
+}
+
+fn stored_face_parts() -> (u64, face_skin::Facts, u32) {
+    let face = stored_face().unwrap_or_else(read_face);
+    (face.seed, face.facts, face.inner)
+}
+
+/// Growth is taken in: each figure only ever rises, and a change is saved.
+fn grow_face(facts: face_skin::Facts, inner: u32) {
+    let Some(mut face) = FACE.with(|c| c.get()) else {
+        return;
+    };
+    let before = face;
+    face = grown(face, facts, inner);
+    if (face.facts, face.inner) != (before.facts, before.inner) {
+        FACE.with(|c| c.set(Some(face)));
+        write_face(face);
+    }
+}
+
+/// `face` after taking in a new count: no figure ever goes down.
+fn grown(mut face: Face, facts: face_skin::Facts, inner: u32) -> Face {
+    face.facts = face_skin::Facts {
+        sessions: face.facts.sessions.max(facts.sessions),
+        messages: face.facts.messages.max(facts.messages),
+        days: face.facts.days.max(facts.days),
+        goals: face.facts.goals.max(facts.goals),
+    };
+    face.inner = face.inner.max(inner);
+    face
 }
 
 /// Bundled face ids. The source of truth is the skin file; this enum is
@@ -309,6 +407,7 @@ pub fn set_inner(activity: &str, points: u32) {
         _ => 0,
     };
     INNER.with(|c| c.set((act, points)));
+    grow_face(face_skin::Facts::default(), points);
 }
 
 /// A resting face shows what she is doing on her own. Anything she is doing
@@ -324,10 +423,54 @@ fn with_inner(mood: Mood) -> Mood {
     }
 }
 
+thread_local! {
+    /// Whether the runtime was last told the owner is typing, and when.
+    static TYPING: Cell<(bool, Option<std::time::Instant>)> = const { Cell::new((false, None)) };
+}
+
+/// The owner is typing to her (or has emptied the box). The runtime is told,
+/// so her curious face shows on every surface and not only in this pane. A
+/// note counts for a few seconds there, so it is repeated while typing goes
+/// on, and sent once when the box empties.
+pub fn note_typing(studio: &Studio, typing: bool) {
+    let (was, at) = TYPING.with(|c| c.get());
+    let fresh = at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3));
+    if typing == was && (fresh || !typing) {
+        return;
+    }
+    TYPING.with(|c| c.set((typing, Some(std::time::Instant::now()))));
+    if studio.local_only {
+        return;
+    }
+    if let Some(client) = studio.runtime() {
+        let body = serde_json::json!({ "typing": typing });
+        crate::depth::api::spawn_json(&client, remedy_ui::net::Request::post("presence/typing").json(&body), |_| {});
+    }
+}
+
+/// The runtime's word for a mood, as a face. None for a word this build does
+/// not know, so an older build falls back to its own reading.
+pub fn mood_named(key: &str) -> Option<Mood> {
+    Mood::all().into_iter().find(|m| m.key() == key)
+}
+
 pub fn from_studio(studio: &Studio) -> Mood {
     // Recount only when the session list changes size; the count is what growth reads.
-    if studio.sessions.get().len() as u32 != FACTS.with(|c| c.get()).sessions {
-        FACTS.with(|c| c.set(face_skin::Facts::from_studio(studio)));
+    let n = studio.sessions.get().len() as u32;
+    if n != COUNTED.with(|c| c.get()) {
+        COUNTED.with(|c| c.set(n));
+        let facts = face_skin::Facts::from_studio(studio);
+        FACTS.with(|c| c.set(facts));
+        grow_face(facts, 0);
+    }
+    // One mood everywhere: the runtime decides it from what she is doing.
+    // Only a window that cannot reach the runtime shows its own (error) face,
+    // and one that has not heard yet reads it locally.
+    if !matches!(studio.conn.get(), Conn::Error(_)) {
+        if let Some(mood) = mood_named(&studio.server_mood.get()) {
+            // "idle" from a runtime that is connected is her listening face.
+            return if mood == Mood::Idle && matches!(studio.conn.get(), Conn::Ready) { Mood::Listening } else { mood };
+        }
     }
     with_inner(mood_from(studio))
 }
@@ -520,8 +663,15 @@ const DESIGN_SEED: u64 = 0x5EED;
 fn draw(ui: &Ui, mood: Mood, size: f32, stage: u8) -> El {
     // Live faces grow from this install's seed and real use. Design shots and
     // tests pin a stage instead.
+    let pinned = STAGE_OVERRIDE.with(|c| c.get()).is_some();
+    if !pinned {
+        // The running app: the one stored face, whenever this is drawn.
+        if let Some(face) = stored_face() {
+            return draw_with(ui, mood, size, stage, Some((face.seed, face.facts)));
+        }
+    }
     let facts = FACTS.with(|c| c.get());
-    let live = STAGE_OVERRIDE.with(|c| c.get()).is_none() && facts.sessions > 0;
+    let live = !pinned && facts.sessions > 0;
     draw_with(ui, mood, size, stage, live.then(|| (face_skin::seed().unwrap_or(DESIGN_SEED), facts)))
 }
 
@@ -565,7 +715,11 @@ fn draw_with(ui: &Ui, mood: Mood, size: f32, stage: u8, grow: Option<(u64, face_
         let (seed, facts) = grow.unwrap_or((DESIGN_SEED, face_proc::facts_for_stage(stage)));
         // Growth is what the two of them did together plus what she did alone.
         let inner = if grow.is_some() { INNER.with(|c| c.get()).1 } else { 0 };
-        face_proc::paint(ui, &frame, seed, facts, inner, mood, size, &colors, motion);
+        // In the running app the painter asks for the stored face each time it
+        // draws, so a face built a minute ago and one built now are the same.
+        let who = (grow.is_some() && FACE.with(|c| c.get()).is_some())
+            .then_some(stored_face_parts as fn() -> (u64, face_skin::Facts, u32));
+        face_proc::paint(ui, &frame, seed, facts, inner, who, mood, size, &colors, motion);
     } else {
         face_draw::paint(ui, &frame, &skin, mood, scale, &colors, stage, motion);
     }
@@ -663,6 +817,19 @@ fn _color(c: Color) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stored_face_only_grows() {
+        let facts = |sessions, messages, days, goals| face_skin::Facts { sessions, messages, days, goals };
+        let start = Face { seed: 7, facts: facts(10, 400, 30, 2), inner: 50, seen: std::time::Instant::now() };
+        // Opening a short conversation, or deleting old ones, counts less: the face stays.
+        let after = grown(start, facts(3, 20, 1, 0), 0);
+        assert_eq!((after.facts, after.inner, after.seed), (start.facts, 50, 7));
+        // More use and more of her own work move it forward, figure by figure.
+        let after = grown(start, facts(12, 380, 45, 2), 80);
+        assert_eq!(after.facts, facts(12, 400, 45, 2));
+        assert_eq!(after.inner, 80);
+    }
 
     #[test]
     fn every_mood_has_a_plain_name() {

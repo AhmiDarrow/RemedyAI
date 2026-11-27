@@ -984,7 +984,23 @@ pub fn spec(seed: u64, facts: Facts, inner: u32, mood: Mood, colors: &ColorRoles
 /// here, at the device size, in the frame that shows them: no loader, no
 /// placeholder. Blink and glance are signals the painter reads, so a change
 /// repaints with the matching frame.
-pub fn paint(ui: &Ui, host: &El, seed: u64, facts: Facts, inner: u32, mood: Mood, size: f32, colors: &ColorRoles, motion: Motion) {
+///
+/// `who` is asked at every repaint when it is given: it returns the one stored
+/// face (seed, shared use, her own growth), so every face on screen is the same
+/// one and they change together. Without it the face is the fixed
+/// `seed`/`facts`/`inner` (design shots and tests).
+pub fn paint(
+    ui: &Ui,
+    host: &El,
+    seed: u64,
+    facts: Facts,
+    inner: u32,
+    who: Option<fn() -> (u64, Facts, u32)>,
+    mood: Mood,
+    size: f32,
+    colors: &ColorRoles,
+    motion: Motion,
+) {
     let base = spec(seed, facts, inner, mood, colors, 0, false);
     let el = ui
         .el("face")
@@ -999,7 +1015,13 @@ pub fn paint(ui: &Ui, host: &El, seed: u64, facts: Facts, inner: u32, mood: Mood
             let closed = motion.blink.get();
             let glance = if closed { 0 } else { motion.glance_x.get().signum() };
             let n = (cx.size.width.min(cx.size.height) * cx.scale.max(0.5)).round().clamp(16.0, 1024.0) as u32;
-            let image = frame(Spec { glance, closed, ..base }, n);
+            let mut now = Spec { glance, closed, ..base };
+            if let Some(who) = who {
+                let (seed, facts, inner) = who();
+                now.seed = seed;
+                now.growth = (growth_points(facts) + inner).min(u16::MAX as u32) as u16;
+            }
+            let image = frame(now, n);
             cx.list.push(Item::Image { image, rect: cx.pixel_box, radii: cx.corners(), sampling: Sampling::Linear });
         });
     let _ = host.clone().child(el);
