@@ -17,20 +17,19 @@ use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{show, El, Ui};
 
-/// The right-hand column. Empty until Memory or Skills is opened.
-pub fn side(ui: &Ui, studio: Studio) -> El {
+/// The right-hand column for one pane (Memory or Skills), empty until it is
+/// opened. One slot per pane: a single slot shown "while any pane is open" was
+/// built once, so opening Skills over Memory changed nothing on screen.
+pub fn side(ui: &Ui, studio: Studio, which: SidePanel) -> El {
     let st = studio.clone();
     let u = ui.clone();
     show(
         ui,
-        move || st.depth.panel.get() != SidePanel::None,
-        move || {
-            let studio = st.clone();
-            match studio.depth.panel.get() {
-                SidePanel::Memory => memory(&u, studio.clone()),
-                SidePanel::Skills => skills(&u, studio),
-                SidePanel::None => w::column(&u),
-            }
+        move || st.depth.panel.get() == which,
+        move || match which {
+            SidePanel::Memory => memory(&u, studio.clone()),
+            SidePanel::Skills => skills(&u, studio.clone()),
+            SidePanel::None => w::column(&u),
         },
     )
     .el()
