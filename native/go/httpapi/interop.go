@@ -62,6 +62,9 @@ func (s *Server) interopCfg() ConfigMap {
 }
 
 func (s *Server) interopInboundOn() bool {
+	if s.interopForceInbound {
+		return true
+	}
 	return coerceBool(resolveAdvanced(advancedByKey()["interop_inbound"], s.interopCfg()), false)
 }
 
@@ -74,6 +77,9 @@ func (s *Server) interopMCPOn() bool {
 }
 
 func (s *Server) interopBind() string {
+	if h := strings.TrimSpace(s.interopBindHost); h != "" {
+		return strings.ToLower(h)
+	}
 	v := strings.ToLower(fmt.Sprint(resolveAdvanced(advancedByKey()["interop_bind"], s.interopCfg())))
 	switch v {
 	case "localhost", "loopback", "off", "":
