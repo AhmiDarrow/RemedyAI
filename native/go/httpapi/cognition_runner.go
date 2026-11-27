@@ -780,6 +780,7 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 			Approvals:      r.Approvals,
 			SessionID:      ownerApprovalSessionID(req),
 			ForceAsk:       !OriginIsOwner(req.Origin),
+			Conservative:   normalizeTrustProfile(cfg["trust_profile"]) == "conservative",
 			HiveRestricted: strings.HasPrefix(origin, "hive:"),
 			LiveContext:    r.LiveContext,
 			Guards:         loadToolGuards(cfg),
@@ -870,7 +871,11 @@ func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor
 	if r.LiveContext != nil {
 		live = r.LiveContext(req.SessionID)
 	}
-	return &workspaceBoundTools{inner: r.Tools, binding: toolBinding{
+	inner := r.Tools
+	if r.HomeDir != "" && cfgBool(LoadConfig(r.HomeDir), "privacy_mode", false) {
+		inner = &redactingTools{inner: inner}
+	}
+	return &workspaceBoundTools{inner: inner, binding: toolBinding{
 		Root:        root,
 		Scope:       scope,
 		HomeDir:     r.HomeDir,

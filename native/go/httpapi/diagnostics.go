@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -124,12 +125,33 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 			if base == "" {
 				continue
 			}
-			probes = append(probes, map[string]any{
-				"id":         p["id"],
-				"base_url":   base,
-				"latency_ms": nil,
-				"ok":         false,
-			})
+			// A real request to the local server: whether it answers and how fast.
+			began := time.Now()
+			up := openaiEndpointReachable(base)
+			probe := map[string]any{"id": p["id"], "base_url": base, "ok": up}
+			if up {
+				probe["latency_ms"] = time.Since(began).Milliseconds()
+			}
+			probes = append(probes, probe)
+		}
+	}
+
+	memory := map[string]any{}
+	if snap := sysres.Read(); snap.Known() {
+		const gb = 1 << 30
+		memory["total_gb"] = round1(float64(snap.TotalBytes) / gb)
+		memory["available_gb"] = round1(float64(snap.AvailableBytes) / gb)
+		memory["used_pct"] = round1(100 * (1 - snap.AvailableFraction()))
+	}
+	nvidia := nvNvidiaPresent()
+	usage7d := []any{}
+	if sum, err := usageSummary(home, 7, ""); err == nil {
+		if rows, ok := sum["by_provider"].([]map[string]any); ok {
+			for _, row := range rows {
+				usage7d = append(usage7d, row)
+			}
+		} else if rows, ok := sum["by_provider"].([]any); ok {
+			usage7d = rows
 		}
 	}
 
@@ -139,9 +161,9 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 		"checked_at": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 		"issues":     issues,
 		"remedy": map[string]any{
-			"version":             s.version,
-			"uptime":              formatUptime(time.Since(s.started)),
-			"uptime_seconds":      round1(uptimeSec),
+			"version":        s.version,
+			"uptime":         formatUptime(time.Since(s.started)),
+			"uptime_seconds": round1(uptimeSec),
 			"api": map[string]any{
 				"host":      "127.0.0.1",
 				"port":      s.apiListenPort,
@@ -160,7 +182,6 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 			"log_dir":             filepath.Join(home, "logs"),
 			"active_provider":     nullIfEmpty(activeProv),
 			"active_model":        nullIfEmpty(activeModel),
-			"health_checks":       map[string]any{},
 			"runtime":             "go",
 		},
 		"rmb": map[string]any{
@@ -183,38 +204,28 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 			"not_ready_hint":   rmb["not_ready_hint"],
 			"vision_suspended": rmb["vision_suspended"],
 			"local_agent_mode": rmb["local_agent_mode"],
+			"nvidia":           nvidia,
 		},
 		"vision": map[string]any{
-			"ok":                 anyBoolDef(vision["ready"], false) || anyBoolDef(vision["installed"], false),
-			"enabled":            vision["enabled"],
-			"running":            vision["running"],
-			"ready":              vision["ready"],
-			"model_id":           vision["model_id"],
-			"port":               vision["port"],
-			"base_url":           vision["base_url"],
-			"suspended_for_rmb":  anyBoolDef(rmb["vision_suspended"], false),
-			"not_ready_hint":     vision["not_ready_hint"],
+			"ok":                anyBoolDef(vision["ready"], false) || anyBoolDef(vision["installed"], false),
+			"enabled":           vision["enabled"],
+			"running":           vision["running"],
+			"ready":             vision["ready"],
+			"model_id":          vision["model_id"],
+			"port":              vision["port"],
+			"base_url":          vision["base_url"],
+			"suspended_for_rmb": anyBoolDef(rmb["vision_suspended"], false),
+			"not_ready_hint":    vision["not_ready_hint"],
 		},
 		"hardware": map[string]any{
 			"platform": runtime.GOOS,
 			"system":   runtime.GOOS,
 			"machine":  runtime.GOARCH,
-			"python":   nil,
 			"hostname": hostnameOrEmpty(),
-			"cpu": map[string]any{
-				"count_logical": runtime.NumCPU(),
-				"percent":       nil,
-				"brand":         nil,
-			},
-			"memory": map[string]any{
-				"total_gb":     nil,
-				"available_gb": nil,
-				"used_pct":     nil,
-			},
-			"gpu": map[string]any{
-				"nvidia": false,
-				"gpus":   []any{},
-			},
+			"cpu":      map[string]any{"count_logical": runtime.NumCPU()},
+			"memory":   memory,
+			// Whether an NVIDIA driver is installed (its nvidia-smi is present).
+			"gpu":   map[string]any{"nvidia": nvidia},
 			"disks": []any{disk},
 		},
 		"providers": map[string]any{
@@ -227,7 +238,7 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 			"remote_connected_count": remoteN,
 			"local_connected_count":  localN,
 			"providers":              providerRows,
-			"usage_7d":               []any{},
+			"usage_7d":               usage7d,
 			"probes":                 probes,
 			"ollama":                 detectOllama("", 800*time.Millisecond),
 		},
@@ -262,6 +273,11 @@ func homeDiskStats(home string) map[string]any {
 		out["error"] = "home missing"
 		return out
 	}
-	// Cross-platform free-space probing is OS-specific; keep path only when unavailable.
+	if free, total := sysres.DiskSpace(home); total > 0 {
+		const gb = 1 << 30
+		out["free_gb"] = round1(float64(free) / gb)
+		out["total_gb"] = round1(float64(total) / gb)
+		out["used_pct"] = round1(100 * (1 - float64(free)/float64(total)))
+	}
 	return out
 }

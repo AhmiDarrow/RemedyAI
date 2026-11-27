@@ -224,6 +224,9 @@ type RegistryPolicy struct {
 	// ForceAsk makes every RiskMutation decision Ask regardless of approval
 	// mode. Set for untrusted origins (messenger, phone, hive) — see OriginIsOwner.
 	ForceAsk bool
+	// Conservative is the owner's trust profile of that name: Auto and Full
+	// do not wave a change through on their own. A standing yes still counts.
+	Conservative bool
 	// HiveRestricted denies computer input, mail, calendar and hive-control
 	// tools. A daughter may read and search; it may not click, type, or send.
 	HiveRestricted bool
@@ -410,7 +413,7 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		// A delegate is never "routine" in Auto: it hands a whole mission to
 		// another agent whose shell and web fetches Remedy's guards never see,
 		// so the owner approves the mission (once, or for the session).
-		if !p.ForceAsk && (mode == "full" || (mode == "auto" && !p.shellAsks(call) && call.Name != "delegate")) {
+		if !p.ForceAsk && !p.Conservative && (mode == "full" || (mode == "auto" && !p.shellAsks(call) && call.Name != "delegate")) {
 			return cognition.Allow
 		}
 		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, p.Origin, !p.ForceAsk) {
