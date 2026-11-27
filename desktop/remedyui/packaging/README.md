@@ -24,16 +24,16 @@ The 1.0 client uses the same flags, the same flag file, and the same three hidde
 
 ## Feed
 
-`latest.json` in this directory is the 1.1.0 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 1.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
+`latest.json` in this directory is the 2.0.0 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 1.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
 
 | Platform | Asset | URL |
 | --- | --- | --- |
-| `windows-x86_64` | `Remedy.Desktop_1.1.0_x64-setup.exe` | `.../releases/download/v1.1.0/` |
-| `linux-x86_64` | `Remedy.Desktop_1.1.0_amd64.AppImage` | `.../releases/download/v1.1.0/` |
-| `darwin-aarch64` | `Remedy.Desktop_1.1.0_aarch64.app.tar.gz` | `.../releases/download/runtime-v1.1.0/` |
-| `darwin-x86_64` | `Remedy.Desktop_1.1.0_x64.app.tar.gz` | `.../releases/download/runtime-v1.1.0/` |
+| `windows-x86_64` | `Remedy.Desktop_2.0.0_x64-setup.exe` | `.../releases/download/v2.0.0/` |
+| `linux-x86_64` | `Remedy.Desktop_2.0.0_amd64.AppImage` | `.../releases/download/v2.0.0/` |
+| `darwin-aarch64` | `Remedy.Desktop_2.0.0_aarch64.app.tar.gz` | `.../releases/download/runtime-v2.0.0/` |
+| `darwin-x86_64` | `Remedy.Desktop_2.0.0_x64.app.tar.gz` | `.../releases/download/runtime-v2.0.0/` |
 
-Also produced, not listed in the feed: `Remedy.Desktop_1.1.0_amd64.deb`, `Remedy.Desktop_1.1.0_aarch64.dmg`, `Remedy.Desktop_1.1.0_x64.dmg`. Those are first-install packages. A `.deb` install cannot replace itself. A DMG left under `/Volumes/` is refused; the person moves the app out of the disk image first.
+Also produced, not listed in the feed: `Remedy.Desktop_2.0.0_amd64.deb`, `Remedy.Desktop_2.0.0_aarch64.dmg`, `Remedy.Desktop_2.0.0_x64.dmg`. Those are first-install packages. A `.deb` install cannot replace itself. A DMG left under `/Volumes/` is refused; the person moves the app out of the disk image first.
 
 The public key is the `RW` line already embedded in `desktop/src-tauri/tauri.conf.json`. Do not generate a new key.
 
