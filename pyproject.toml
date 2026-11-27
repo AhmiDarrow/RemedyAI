@@ -23,40 +23,15 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 requires-python = ">=3.12"
-dependencies = [
-    "aiohttp>=3.14.2,<4",
-    "comtypes>=1.4.0; sys_platform == 'win32'",
-    "packaging>=24.0,<26",
-    "pydantic>=2.13.4,<3",
-    "pyyaml>=6.0.3,<7",
-    "pynacl>=1.5.0,<2",
-    "rich>=15.0.0,<16",
-]
+# The package is the `remedy` launcher: it finds (or downloads) the native
+# runtime and hands it the command line. Standard library only.
+dependencies = []
 
-# Optional install groups.
-# `server` keeps fastapi / uvicorn / python-multipart for optional claimidx
-# tooling and older pins. Production :7400 is Go remedy-runtime only
-# (FastAPI create_app deleted); they are not base-install deps.
 [project.optional-dependencies]
-server = [
-    "fastapi>=0.139.2,<1",
-    "uvicorn>=0.51.0,<1",
-    "python-multipart>=0.0.9,<1",
-]
-# Local speech: Kokoro-82M TTS (Apache-2.0 model, MIT runtime) +
-# faster-whisper STT (MIT). Optional — base install stays light.
-voice = [
-    "kokoro-onnx>=0.3.0,<1",
-    "faster-whisper>=1.0.0,<2",
-]
 # Sprite-sheet post-processing for the bundled game-assets skill
 # (scripts/sheet_tools.py). Pillow only, no network.
 game-assets = [
     "pillow>=10.0.0,<13",
-]
-# Human-bar TTS (Grove HQ + phone). Heavy: pulls torch. Not first-run.
-voice-hq = [
-    "chatterbox-tts",
 ]
 
 [project.urls]
@@ -68,8 +43,9 @@ Issues = "https://github.com/AhmiDarrow/RemedyAI/issues"
 
 [project.scripts]
 remedy = "remedy.interfaces.cli.launcher:main"
-# Standalone MCP stdio host (any MCP-compatible client can call this binary)
-remedy-mcp = "remedy.tools.mcp_server:main"
+# Standalone MCP stdio host (any MCP-compatible client can call this binary):
+# the same as `remedy mcp serve`.
+remedy-mcp = "remedy.interfaces.cli.launcher:mcp_main"
 
 [build-system]
 requires = ["uv_build>=0.11.31,<0.12.0"]
@@ -104,9 +80,6 @@ unsafe-fixes = false
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803", "N806", "SIM117"]
-# Translation tables: late imports stitch overlays; dict() packs kwargs for _core.
-"src/remedy/i18n/chrome_fill*.py" = ["E402", "C408"]
-"src/remedy/i18n/chrome_final*.py" = ["E402", "C408"]
 # Soak/live scripts: path bootstrap imports, intentional bare Fail, loop closures.
 "scripts/*" = [
     "B007",
@@ -120,18 +93,6 @@ unsafe-fixes = false
     "SIM115",
     "SIM117",
 ]
-"src/remedy/interfaces/api.py" = ["N806"]
-"src/remedy/interfaces/secret_store.py" = ["N801"]
-"src/remedy/core/agent.py" = ["N806"]
-"src/remedy/core/agent_context.py" = ["N806"]
-"src/remedy/core/computer/desktop_win.py" = ["N801", "N806"]
-"src/remedy/core/metabolism/identity_export.py" = ["N806"]
-"src/remedy/core/react_policy.py" = ["N806"]
-"src/remedy/core/react_loop/loop_steps.py" = ["N806"]
-    # Orchestrator re-exports names so tests can patch ``loop.<name>``.
-    "src/remedy/core/react_loop/loop.py" = ["F401"]
-"src/remedy/interfaces/config.py" = ["N806"]
-"src/remedy/vision/config.py" = ["N806"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -144,15 +105,8 @@ platform = "linux"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
-# The whole tree is checked. `exclude` is Win32-only (Linux CI has no windll).
-# Do not exclude a module because it is large — split it and type the pieces.
 files = ["src/remedy"]
-exclude = [
-    # Win32-only ctypes/os.startfile — mypy on Linux CI has no windll/WINFUNCTYPE.
-    "src/remedy/core/computer/desktop_win.py",
-    "src/remedy/core/computer/desktop_uia.py",
-    "src/remedy/core/companion.py",
-]
+exclude = []
 
 [dependency-groups]
 dev = [

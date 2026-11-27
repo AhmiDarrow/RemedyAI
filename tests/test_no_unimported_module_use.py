@@ -77,7 +77,7 @@ def _sources() -> list[Path]:
 
 
 def test_there_are_sources_to_check():
-    assert len(_sources()) > 100
+    assert len(_sources()) >= 10
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="ast.parse target")

@@ -8,7 +8,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Layer | Path | Role |
 |-------|------|------|
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
-| Python package | `src/remedy/` | The `remedy` command line and older library code. The runtime starts no Python and the installers ship none |
+| Python package | `src/remedy/` | The `remedy` launcher only: it finds or downloads `remedy-runtime` and hands it the command line (standard library, no dependencies). Also holds the bundled skills, which the runtime loads as data |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
@@ -17,8 +17,8 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
 | Gateway | `native/go/gateway/` + `native/go/httpapi` (SSOT `messenger_catalog.json`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema via embedded JSON; Python `messenger_settings` loads that fixture fail-closed for TestClient/scrub/CLI only (no catalog twin; no adapter/router/session_bridge; no `/api/webhooks*` registrar) |
 | Native runtime | `native/` | Go runtime and Zig capability core. Speech runs in the Rust `remedy-voice` helper; the image model and the local search engine are downloaded, verified and supervised by the runtime |
-| Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
-| Peer interop | `src/remedy/interop/` + `native/go/httpapi/interop.go` | A2A v1.0 and MCP talk-to-Remedy. Peers, not muscles. Inbound off / localhost / token by default. See `docs/AGENT_INTEROP.md`. |
+| Claimidx host | `native/go/httpapi/claimidx_host.go` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
+| Peer interop | `native/go/httpapi/interop.go` | A2A v1.0 and MCP talk-to-Remedy. Peers, not muscles. Inbound off / localhost / token by default. See `docs/AGENT_INTEROP.md`. |
 
 Entry: `remedy serve` → `remedy-runtime` · verification: `scripts/prepush.py` runs
 the authoritative multi-stack matrix on the owner's machine (there is no CI on
@@ -33,16 +33,11 @@ Tool ABI, durable state/events/memory, scheduling, scoped agents and the native
 helpers. `native/zig/` exports a small C ABI and independently
 checks capabilities before machine-facing execution.
 
-`src/remedy/runtime/native_runtime.py` is the Zig/Go probe seam for capability
-routing. The selector accepts `compatibility` (the default), `auto`, or `native`
-through `REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool
-ABI 1 and Zig C ABI **7** (`REMEDY_CORE_ABI_VERSION`) must both probe healthy
-before the native route becomes effective. Fallback after a native attempt is
-allowed only for operations declared idempotent.
+The Go tool ABI (1) and the Zig C ABI (`REMEDY_CORE_ABI_VERSION`) are probed at start;
+a tool that needs the Zig core fails closed when the core is missing or of another ABI.
 
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
-packaged Desktop launch that binary (fail closed if missing). Python does not
-start uvicorn on `:7400`; FastAPI `create_app` / `interfaces.api` are deleted; Go httpapi owns `:7400`.
+packaged Desktop launch that binary (fail closed if missing). The Python `remedy` command is a launcher for that binary.
 There is no Python worker. Startup
 performs one bounded readiness probe only when native mode is requested; the
 liveness route remains probe-free. Native durability requires contiguous event
@@ -71,8 +66,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 - **Model surface** — the model is advertised `read, edit, write, glob, grep, bash, jobs, todo, screenshot, delegate` plus `computer.*` / `clipboard.*`, `web.*` / `memory.*` / `skill.*` / `mail.*` / `calendar.*`. The internal ids (`workspace.*`, `shell.exec`, diagnostics) stay registered for the CLI and tests but are hidden through `tools.IsModelHiddenTool`. Approvals are fingerprinted on the **Tool ABI id**, never the provider's wire name.
 - **Turn log / evidence** — every streamed turn writes `<home>/sessions/<sid>/turns/<request_id>.jsonl`: full tool output, images beside it, usage, approvals, one monotonic `seq` per frame. `GET …/stream/attach` replays it and then tails the live turn, so a reload rejoins work in progress; `GET …/turns/{request_id}/tools/{call_id}` serves the complete result behind the short SSE preview. Pruned per turn (40 newest per session, 30 days).
 - **Providers** — `providers.Anthropic` (official SDK: prompt caching with an explicit stable/volatile system split, adaptive thinking, effort, images, `stop_reason`, usage) and `providers.OpenAICompat` for everything else. Both implement `ToolAdvertiser`, which is the runner's single seam for pushing the tool surface.
-- **ReAct (Python helpers)** — `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`, `llm_api_errors.py` remain for workers/tests. The Python `react_loop` package is **deleted**; BasicRuntime/`remedy chat` fail closed toward Go. CLI `remedy tool` uses Go `GET /api/tools` + `POST /api/tools/invoke` (no BasicRuntime).
-- **PolicyEngine** — `policy/engine.py`. Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived. Trust profiles live in `APPROVALS.needs_ask`.
+- **Policy** — `native/go/httpapi` (`RegistryPolicy`, `guards.go`). Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived.
 - **Write jail** — `core/security` + computer executor. Runtime-bin skip requires a real executable extension; cross-session computer state is thread-local per session.
 - **Hive** — daughters are capped; no parent Partner Memory writes; no nested spawn. PROCESS_EXEC + FS_WRITE + NETWORK_READ by design for foragers (not a full sandbox).
 - **Build engine** — TDD → unit hop → gate-tower verify. Plan steps may record intended / observed / evidence. Completion is decided on evidence, not prose: `prompt.should_continue` receives the last tool batch, so a claim of success after a non-zero exit re-arms with the failure named.
@@ -80,23 +74,21 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 
 ## Language
 
-`src/remedy/i18n/` — `ui_language` (`auto` or a BCP-47 id). Chrome catalogs overlay English. Reply-language is a system-prompt line (`language_system_line`); it does not strip tools or checkpoints. `GET /api/i18n`. Desktop: `desktop/src/i18n/`. Help manuals stay English until translated.
+`native/go/httpapi/i18n.go` — `ui_language` (`auto` or a BCP-47 id). Chrome catalogs overlay English. Reply-language is a system-prompt line (`language_system_line`); it does not strip tools or checkpoints. `GET /api/i18n`. Desktop: `desktop/src/i18n/`. Help manuals stay English until translated.
 
 ## Voice stack
 
-- API: `src/remedy/interfaces/routes/voice.py` → `src/remedy/voice/service.py`
-- First-run: `ensure_voice_assets` + `maybe_ensure_local_model` on API lifespan (skipped in pytest). Chatterbox HQ is **opt-in**, not first-run.
-- First-run setup session lives in `setup_session.json` and `GET`/`PUT /api/setup`; house rules are `src/remedy/core/house_rules.py` plus `/house_rules` and `settings.patch` confirmation. Docs: [SETUP.md](SETUP.md), [HOUSE_RULES.md](HOUSE_RULES.md).
+- API: `native/go/httpapi/voice.go` → `voice_native.go` → the `remedy-voice` helper (`native/voice`)
+- First-run setup session lives in `setup_session.json` and `GET`/`PUT /api/setup`; house rules are `native/go/mind/houserules` plus `/house_rules` and `settings.patch` confirmation. Docs: [SETUP.md](SETUP.md), [HOUSE_RULES.md](HOUSE_RULES.md).
 - UI: `desktop/src/components/settings/VoiceSection.tsx` (HQ toggle), Grove `GroveVoiceControls` (speak/quiet only), Studio composer/status bar
-- Smart-turn: pinned ONNX under `~/.remedy/voice/models/smart-turn/`; detector `voice.realtime.turn.make_detector` globs `*.onnx` (no restart)
 - Identity: `~/.remedy/voice/identity.json`.
 - Telephony loopback: `SipDirectBackend` (`sip_direct`) — UDP/in-process echo on 127.0.0.1, `simulated=True`
 
 ## Voice
 
 Install and status are HTTP. Desktop and WebUI share Settings/Grove/Studio.
-CLI stays text-only. Capability/policy contracts live in `src/remedy/policy/`
-and `src/remedy/tools/`.
+CLI stays text-only. Capability and policy contracts live in `native/go/tools` and
+`native/go/httpapi`.
 
 ## Grove Connect
 
