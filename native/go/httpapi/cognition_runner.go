@@ -344,7 +344,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 			return nil
 		}
 		if errors.Is(out.Err, cognition.ErrNoProgress) {
-			safeEmit("@@status:Stuck repeating the same steps — change approach or nudge Remedy, then continue.\n")
+			safeEmit("@@status:Stopped: the same steps kept returning the same results. Tell Remedy what to try, or send continue.\n")
 			return fmt.Errorf("%w: repeated the same tools without progress", out.Err)
 		}
 		if errors.Is(out.Err, cognition.ErrBudgetExhausted) {
@@ -357,7 +357,11 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 				safeEmit("@@status:Step budget used up for this pulse — continue with another pulse if more work remains.\n")
 				return cognition.ErrBudgetExhausted
 			}
-			safeEmit("@@status:Safety stop after a stuck loop. History is intact — send continue to keep going.\n")
+			if !OriginIsOwner(req.Origin) {
+				safeEmit("@@status:This turn came from outside and used the steps such a turn gets.\n")
+			} else {
+				safeEmit("@@status:Safety stop: this turn reached the step ceiling. History is intact — send continue to keep going.\n")
+			}
 			return fmt.Errorf("%w (safety stop, not a task budget)", out.Err)
 		}
 		if errors.Is(out.Err, cognition.ErrIncompleteModelStream) {
@@ -944,7 +948,7 @@ func (r *CognitionTurnRunner) runEngine(
 		},
 		EpochHook: func(epoch, totalSteps, toolCalls int, ledger []string, turn *cognition.Turn) {
 			safeEmit(fmt.Sprintf(
-				"@@status:Checkpoint %d — compacted context after %d steps / %d tools; continuing until the work is done…\n",
+				"@@status:Checkpoint %d — %d steps and %d tool calls so far; still working…\n",
 				epoch, totalSteps, toolCalls,
 			))
 			// Mid-build: switch to coding-pack schemas (lower per-step tax).
@@ -962,7 +966,11 @@ func (r *CognitionTurnRunner) runEngine(
 			}
 		},
 		ContinueGate: func(gateCtx context.Context, turn cognition.Turn, toolCount int, last []cognition.ToolResult, verifySeen bool) (bool, string) {
-			return r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen, gate)
+			cont, nudge, reason := r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen, gate)
+			if !finishCheckApplies(loadHomeConfig(r.HomeDir), reason, live.ContextWindow()) {
+				return false, ""
+			}
+			return cont, nudge
 		},
 	}
 	return engine.RunTurn(ctx, seed)
@@ -977,17 +985,17 @@ func (r *CognitionTurnRunner) shouldContinue(
 	last []cognition.ToolResult,
 	verifySeen bool,
 	gate *prompt.ContinueState,
-) (bool, string) {
+) (bool, string, string) {
 	if req.ChatMode || !r.nativeOn() {
 		// With nothing to judge the reply, never re-arm on tool_count alone
 		// (explore thrash).
-		return false, ""
+		return false, "", ""
 	}
 	if partnerRunConcluded(req.Origin, turn.LastAssistantText()) {
 		// Background work Remedy started (child, routine, autopilot) ends
 		// with an explicit STATUS report. Re-arming past it spends model
 		// usage on work nobody asked for (a "build" reflex writing files).
-		return false, ""
+		return false, "", ""
 	}
 	input := map[string]any{
 		"goal":         turn.FirstUserText(),
@@ -1004,8 +1012,30 @@ func (r *CognitionTurnRunner) shouldContinue(
 	if gate == nil {
 		gate = &prompt.ContinueState{}
 	}
-	cont, nudge, _ := prompt.DecideContinue(input, gate)
-	return cont, nudge
+	return prompt.DecideContinue(input, gate)
+}
+
+// finishCheckApplies says whether a keep-going check may send the model back
+// to work after a reply with no tool calls. The checks were written for models
+// that stopped early or described work instead of doing it. finish_checks:
+//
+//	auto (default)  all of them for a small model (a window of at most
+//	                cognition.SmallContextWindow tokens); for any other model
+//	                only "a check failed and the reply says it is done", which
+//	                is a fact, not a push
+//	all             all of them for every model (how it was)
+//	off             none
+func finishCheckApplies(cfg ConfigMap, reason string, window int) bool {
+	switch strings.ToLower(strings.TrimSpace(cfgString(cfg, "finish_checks", "auto"))) {
+	case "off", "false", "none":
+		return false
+	case "all", "on", "true":
+		return true
+	}
+	if window > 0 && window <= cognition.SmallContextWindow {
+		return true
+	}
+	return reason == "verify_failed"
 }
 
 // lastResultsInput is the ContinueGate wire shape: name, ok and the last

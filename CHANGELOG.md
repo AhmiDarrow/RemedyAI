@@ -15,7 +15,15 @@ All notable changes to Remedy are documented here.
 - The Files rail shows each entry's size and age, sorts by newest or largest as well as by name, and has a right-click menu (open, reveal, copy path, copy name). The reveal and copy buttons are icons that appear on the row under the pointer.
 
 ### Changed
-- Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
+- A turn carries the conversation, not its last dozen messages: up to about 200 earlier messages (16,000 characters each, about 60,000 tokens in all), loaded in steps that keep the provider's prompt cache valid. When older messages are left out, Remedy is told how many.
+- The repeat check counts the same call returning the same result. Four identical runs are allowed, the next three are refused with a note, and only then does the turn stop. Watching a background job or the screen never counts.
+- `finish_checks` (`auto`, `all`, `off`) decides when a reply with no tool calls is sent back to work. `auto`, the default, keeps every check for small local models and, for larger ones, only the case where a check failed and the reply says the work is done.
+- The room kept for the reply is at most a quarter of the model's window (it was a fixed 16,000 tokens, more than a local model's whole window), and the system prompt counts toward the compaction budget.
+- One round of many large tool results is capped as a whole, so it cannot fill the window by itself.
+- `web.fetch` and `grep` say when a page was cut short or files were too large to search. A file read that had to be cut no longer returns an offset that skips text.
+- The system prompt, the checkpoint line and the manual no longer say that checkpoints compact context. They do not.
+- Removed: a no-progress check that could not fire, `[execution]` settings nothing read, and `REMEDY_LOCAL_CTX` shrinking a cloud model's window.
+- Frontier-sized tool and context limits: tool results keep 100,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 - The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
 - One version number, 2.1.1, for the desktop, the phone app, the runtime and the command line.
 - The `remedy` command line runs in the Go runtime. The pip package (`remedy-ai`) is gone: install with the installers from the releases page, or on a machine without a desktop with the install script (`scripts/install.sh`, `scripts/install.ps1`). `remedy-mcp` is now `remedy mcp serve`, and `remedy update` checks the release feed and says how to update.

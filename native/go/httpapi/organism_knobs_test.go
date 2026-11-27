@@ -14,7 +14,7 @@ func TestAdvancedDefaultsMatchProduction(t *testing.T) {
 	if tbl["soul_inject_chars"] != 1400 {
 		t.Fatalf("soul_inject_chars=%v", tbl["soul_inject_chars"])
 	}
-	if tbl["max_result_chars"] != 30000 {
+	if tbl["max_result_chars"] != 100000 {
 		t.Fatalf("max_result_chars=%v", tbl["max_result_chars"])
 	}
 	if tbl["self_inject_idle_s"] != 300 {

@@ -807,7 +807,7 @@ func classifySensitiveComputer(call cognition.ToolCall, live string) bool {
 			raw := string(call.Input)
 			switch name {
 			case "shell.exec", "bash":
-				return shellMoneyRe.MatchString(raw) || shellCredentialRe.MatchString(raw)
+				return shellMoneyRe.MatchString(notVersionControlCheckout(raw)) || shellCredentialRe.MatchString(raw)
 			case "computer.click", "computer.uia.action", "computer.key",
 				"computer.type", "computer.key.hold", "computer.drag":
 				return sensitiveComputerRe.MatchString(raw) || challengeWallRe.MatchString(raw)
@@ -902,7 +902,18 @@ func shellArgvIsSensitive(args map[string]any) bool {
 	if strings.TrimSpace(joined) == "" {
 		return false
 	}
-	return shellMoneyRe.MatchString(joined) || shellCredentialRe.MatchString(joined)
+	return shellMoneyRe.MatchString(notVersionControlCheckout(joined)) || shellCredentialRe.MatchString(joined)
+}
+
+// gitCheckoutRe is "checkout" as version control says it: the git subcommand
+// (with any options before it) and the actions/checkout step of a workflow.
+var gitCheckoutRe = regexp.MustCompile(`(?i)\bgit(?:\.exe)?(?:\s+-{1,2}\S+(?:\s+[^-\s]\S*)?)*\s+checkout\b|\bactions/checkout\b`)
+
+// notVersionControlCheckout drops those from a command before it is read for
+// payment words, so switching a branch is not taken for paying at a shop.
+// Every other "checkout" in the command still counts.
+func notVersionControlCheckout(cmd string) string {
+	return gitCheckoutRe.ReplaceAllString(cmd, " ")
 }
 
 // looksLikeRawCard is true when text contains a Luhn-valid 13–19 digit run.

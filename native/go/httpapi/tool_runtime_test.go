@@ -235,6 +235,10 @@ func TestIsSensitiveComputerAction(t *testing.T) {
 		{"shell ssh key", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\x\\type.exe","C:\\Users\\me\\.ssh\\id_rsa"]}`)}, "", true},
 		{"shell stripe charge", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["stripe","charges","create","--amount","5000"]}`)}, "", true},
 		{"shell build", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\Go\\bin\\go.exe","test","./..."]}`)}, "", false},
+		{"git checkout is not a shop", cognition.ToolCall{Name: "bash", Input: []byte(`{"command":"cd repo; git checkout -- .github/workflows/ci.yml; git -C other checkout main"}`)}, "", false},
+		{"actions/checkout is not a shop", cognition.ToolCall{Name: "bash", Input: []byte(`{"command":"sed -i s#actions/checkout@v4#actions/checkout@v5# ci.yml"}`)}, "", false},
+		{"a shop checkout still asks", cognition.ToolCall{Name: "bash", Input: []byte(`{"command":"curl -X POST https://shop.example/checkout"}`)}, "", true},
+		{"git checkout does not hide a payment", cognition.ToolCall{Name: "bash", Input: []byte(`{"command":"git checkout main && stripe charges create --amount 5000"}`)}, "", true},
 		{"other tool", cognition.ToolCall{Name: "workspace.write", Input: []byte(`{"path":"pay now.txt","label":"Place order"}`)}, "", false},
 	}
 	for _, tc := range cases {

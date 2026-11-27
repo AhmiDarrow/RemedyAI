@@ -1082,7 +1082,7 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 
 	matches := make([]map[string]any, 0, 32)
 	truncatedFiles := make([]string, 0, 4)
-	filesSearched, filesMatched := 0, 0
+	filesSearched, filesMatched, filesTooLarge := 0, 0, 0
 	truncated := false
 
 	search := func(loc located, matchRel string) error {
@@ -1093,7 +1093,11 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 			return nil
 		}
 		info, err := bound.Stat(loc)
-		if err != nil || info.Size() > grepMaxFileBytes {
+		if err != nil {
+			return nil
+		}
+		if info.Size() > grepMaxFileBytes {
+			filesTooLarge++
 			return nil
 		}
 		data, err := bound.ReadFile(loc)
@@ -1155,8 +1159,12 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 		"truncated":       truncated,
 		"truncated_files": truncatedFiles,
 	}
+	if filesTooLarge > 0 {
+		// Not searched is not the same as no match.
+		result["files_too_large"] = filesTooLarge
+	}
 	if truncated {
-		note := fmt.Sprintf("results truncated at %d matches (per-file cap %d)", grepMaxResults, grepMaxPerFile)
+		note := fmt.Sprintf("results truncated at %d matches (per-file cap %d)", limit, grepMaxPerFile)
 		if len(truncatedFiles) > 0 {
 			note += "; raise the pattern specificity or page with a tighter path to see matches past the cap"
 		}

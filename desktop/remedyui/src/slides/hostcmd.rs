@@ -80,16 +80,15 @@ pub fn save_text_file(
 }
 
 /// Native open dialog. Files over 8 MB are refused. `Ok(None)` is a cancel.
-#[allow(dead_code)]
 pub fn open_text_file(done: impl FnOnce(Result<Option<OpenedText>, String>) + 'static) {
     let Some((app, window)) = current_host() else {
         done(Err("no window for open dialog".into()));
         return;
     };
     let mut dialog = FileDialog::default();
-    dialog.title = "Import Remedy session".into();
+    dialog.title = "Open a text file".into();
     dialog.filters = vec![
-        ("Session export".into(), vec!["txt".into(), "md".into()]),
+        ("Text and Markdown".into(), vec!["txt".into(), "md".into()]),
         ("All files".into(), vec!["*".into()]),
     ];
     app.file_dialog(Some(&window), dialog, move |paths| {
@@ -106,8 +105,7 @@ pub fn open_text_file(done: impl FnOnce(Result<Option<OpenedText>, String>) + 's
         };
         if meta.len() > 8_000_000 {
             done(Err(
-                "File too large (8 MB max). Export without embedded images or split the session."
-                    .into(),
+                "File too large (8 MB max).".into(),
             ));
             return;
         }

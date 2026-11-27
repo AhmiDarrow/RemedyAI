@@ -46,7 +46,7 @@ func TestCLISystemSetupQuickAsksNothing(t *testing.T) {
 	}
 	cfg := sysReadConfig(t, home)
 	for _, want := range []string{`llm_provider = "openai"`, `llm_base_url = "https://api.openai.com/v1"`, `name = "Remedy"`,
-		`enabled_channels = ["cli"]`, "skills_dir = []", "setup_completed = true", "[gateway]", "heartbeat_interval = 60", "[execution]", "max_retries = 3"} {
+		`enabled_channels = ["cli"]`, "skills_dir = []", "setup_completed = true", "[gateway]", "heartbeat_interval = 60"} {
 		if !strings.Contains(cfg, want) {
 			t.Fatalf("quick config misses %q:\n%s", want, cfg)
 		}

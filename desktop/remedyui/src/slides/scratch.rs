@@ -200,6 +200,18 @@ impl ScratchModel {
         });
     }
 
+    fn import(&self) {
+        let model = self.clone();
+        hostcmd::open_text_file(move |res| match res {
+            Ok(Some(file)) => {
+                model.save(with_opened(&model.text.get(), &file.text), true);
+                model.flash(format!("Opened {}", file.name), 4000);
+            }
+            Ok(None) => model.flash("Open cancelled".into(), 2000),
+            Err(e) => model.flash(e, 4000),
+        });
+    }
+
     fn export(&self) {
         if let Some(host) = self.host.borrow().clone() {
             let prev = self.timer.get();
@@ -217,6 +229,16 @@ impl ScratchModel {
             Ok(None) => model.flash("Save cancelled".into(), 2000),
             Err(e) => model.flash(e, 4000),
         });
+    }
+}
+
+/// The note after a file is opened into it: the file alone in an empty note,
+/// else after what is already written. Opening never throws writing away.
+fn with_opened(current: &str, opened: &str) -> String {
+    if current.trim().is_empty() {
+        opened.to_string()
+    } else {
+        format!("{}\n\n{}", current.trim_end(), opened)
     }
 }
 
@@ -422,6 +444,13 @@ fn toolbar(ui: &Ui, model: &ScratchModel, unit: f32, colors: &remedy_ui::style::
         move || m.text.get().is_empty()
     });
 
+    let open = w::button(ui, "Open…", {
+        let m = model.clone();
+        move || m.import()
+    })
+    .variant("quiet");
+    w::tooltip(&open, "Open a text or Markdown file into this note");
+
     let save = w::button(ui, "Save as…", {
         let m = model.clone();
         move || m.export()
@@ -456,6 +485,7 @@ fn toolbar(ui: &Ui, model: &ScratchModel, unit: f32, colors: &remedy_ui::style::
             preview,
         )
         .child("Copy", copy)
+        .child("Open…", open)
         .child("Save as…", save)
         .child("Clear", clear)
         .el()
@@ -675,6 +705,13 @@ fn pad(y: f32, x: f32) -> remedy_ui::core::Insets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_a_file_keeps_what_is_written() {
+        assert_eq!(with_opened("", "from file"), "from file");
+        assert_eq!(with_opened("  \n", "from file"), "from file");
+        assert_eq!(with_opened("mine\n", "from file"), "mine\n\nfrom file");
+    }
 
     #[test]
     fn stats_match_the_scratch_pad_rules() {
