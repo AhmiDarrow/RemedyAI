@@ -224,7 +224,7 @@ Run on the owner's PC against this branch. Fixes for what it found are on the br
 
 The `remedy` command now runs in Go (`remedy-runtime`) for auth, config,
 settings, user, memory, handoff, session, desktop, exec, open, serve, tool,
-gateway, chat and connect-relay. The rest still runs the Python CLI until it
+gateway, chat, connect-relay, setup, update, uninstall, mcp and computer. The rest still runs the Python CLI until it
 moves over. None of these change the display resolution or scale.
 
 - `remedy --version` and `remedy --help`. Passing: both answer from Go, and
@@ -248,3 +248,23 @@ moves over. None of these change the display resolution or scale.
 - `remedy memory` commands that write the repair marker and backup manifest.
   Passing: both files appear under the Remedy home with Windows paths that
   open.
+- `remedy setup`: at the API key and bot token questions, type a key.
+  Passing: nothing you type shows, and the key ends up in the secret store,
+  not in config.toml.
+- `remedy update --check` from a pip install. Passing: it names the installed
+  and latest versions. From the desktop app's own copy it only reports.
+- `remedy uninstall --dry-run`, then `remedy uninstall --purge` on a test
+  account with vision installed and llama-server running. Passing: the dry
+  run removes nothing; the real run stops llama-server, removes `vision/` and
+  the Remedy home, leaves the desktop app to Windows Apps, and pip only ever
+  touches `remedy-ai`.
+- `remedy computer host start`, then queue a job from the app (open a URL,
+  snapshot, click, type, a key combo). Passing: the URL opens in the browser,
+  the click and typing land where the snapshot said, and every job reports
+  done or an error. With the desktop app's own computer use running, the CLI
+  host steps aside.
+- `remedy mcp serve` from an MCP client, and `remedy mcp serve --http`.
+  Passing: tools list and a call work; `--http --port 7400` is refused.
+- Zig's spawn policy lets these through: `python -m pip`, `python -c`, `git
+  fetch/pull/rev-list/status`, `powershell` (the llama-server lookup) and
+  skill scripts run with `python`.
