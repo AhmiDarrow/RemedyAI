@@ -219,3 +219,32 @@ Run on the owner's PC against this branch. Fixes for what it found are on the br
 ### Noticed, not changed
 
 - On a new home, Settings reports `approval_mode: auto` while the runtime acts as Ask until the mode is saved once.
+
+## 9. Go CLI checks
+
+The `remedy` command now runs in Go (`remedy-runtime`) for auth, config,
+settings, user, memory, handoff, session, desktop, exec, open, serve, tool,
+gateway, chat and connect-relay. The rest still runs the Python CLI until it
+moves over. None of these change the display resolution or scale.
+
+- `remedy --version` and `remedy --help`. Passing: both answer from Go, and
+  `remedy-runtime --probe` shows `"cli": 1`.
+- `remedy desktop launch`, then close the terminal. Passing: the desktop app
+  stays open (it is started through explorer.exe, not as a child).
+- `remedy open` with the app running. Passing: the default browser opens the
+  one-time WebUI link.
+- `remedy exec -- format C:` and `remedy exec -- cmd /c takeown /f C:\Windows`.
+  Passing: both print "Execution blocked by security policy" and exit 2, and
+  nothing runs. `remedy exec -- cmd /c echo hi` prints hi and exit code 0.
+- `remedy auth login` (or `remedy settings set` for a key): at the hidden
+  prompt, type a few characters, then press Ctrl-C. Passing: nothing you typed
+  showed, and the terminal echoes normally again afterwards.
+- `remedy config init` with `USERPROFILE` set and with it unset. Passing: the
+  config lands in the same home folder the app uses, and the Documents path it
+  prints is your real Documents folder (including a OneDrive-redirected one).
+- With the desktop app running, `remedy memory backup` and
+  `remedy memory vacuum`. Passing: the backup file opens, vacuum either
+  finishes or says the database is busy, and the app keeps working.
+- `remedy memory` commands that write the repair marker and backup manifest.
+  Passing: both files appear under the Remedy home with Windows paths that
+  open.
