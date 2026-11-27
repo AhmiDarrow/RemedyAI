@@ -107,6 +107,11 @@ func copySkillDir(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o700)
 		}
+		// Copy plain files only: a link in a skill folder could point at any
+		// file on the machine (an SSH key) and would land in ~/.remedy/skills.
+		if !d.Type().IsRegular() {
+			return nil
+		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
