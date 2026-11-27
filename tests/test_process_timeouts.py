@@ -59,7 +59,7 @@ async def test_stdin_is_closed_so_a_prompt_cannot_block():
 def test_no_process_wait_in_the_tree_is_unbounded():
     """Whole-class guard. Interactive dev servers (npm run dev) are exempt —
     they are meant to run until the owner stops them."""
-    exempt = {"interfaces/cli/cmd_runtime.py"}
+    exempt = set()
     offenders: list[str] = []
 
     for path in sorted(Path("src/remedy").rglob("*.py")):

@@ -8,11 +8,11 @@ import json
 import sys
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import remedy.webui as webui
+from remedy.interfaces.cli import launcher
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -132,40 +132,18 @@ def test_check_wheel_release_requires_pins_for_its_version(tmp_path) -> None:
     assert check_mod.check(good, release=True) == []
 
 
-def _serve_env(monkeypatch, tmp_path) -> dict[str, str]:
-    import remedy.interfaces.cli.cmd_runtime as CR
-
-    called: dict[str, object] = {}
-
-    def fake_call(cmd, *args, **kwargs):
-        called["env"] = dict(kwargs.get("env") or {})
-        return 0
-
-    monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(tmp_path / "remedy-runtime"))
-    monkeypatch.setattr(CR.subprocess, "call", fake_call)
-    monkeypatch.setattr(CR, "_print_bootstrap_link_when_ready", lambda *a, **k: None)
-    with pytest.raises(SystemExit):
-        CR._cmd_serve(SimpleNamespace(
-            home=str(tmp_path / "home"), host="127.0.0.1", port=7400, skip_setup=True,
-            force_setup=False, config_file=None, computer_host=False, no_computer_host=False,
-        ))
-    env = called["env"]
-    assert isinstance(env, dict)
-    return env
-
-
-def test_serve_hands_bundled_ui_to_runtime(monkeypatch, tmp_path) -> None:
+def test_launcher_hands_bundled_ui_to_runtime(monkeypatch, tmp_path) -> None:
     target = tmp_path / "dist"
     stage_mod.stage(_fake_build(tmp_path), target, "9.9.9")
     monkeypatch.setattr(webui, "WEBUI_DIST_DIR", target)
     monkeypatch.delenv("REMEDY_BUNDLED_WEBUI_DIR", raising=False)
-    env = _serve_env(monkeypatch, tmp_path)
+    env = launcher.child_env(None)
     assert env["REMEDY_BUNDLED_WEBUI_DIR"] == str(target)
     # Lowest priority only: an explicit REMEDY_WEBUI_DIR is left alone.
     assert "REMEDY_WEBUI_DIR" not in env or env["REMEDY_WEBUI_DIR"] != str(target)
 
 
-def test_serve_without_bundled_ui_sets_nothing(monkeypatch, tmp_path) -> None:
+def test_launcher_without_bundled_ui_sets_nothing(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(webui, "WEBUI_DIST_DIR", tmp_path / "missing")
     monkeypatch.delenv("REMEDY_BUNDLED_WEBUI_DIR", raising=False)
-    assert "REMEDY_BUNDLED_WEBUI_DIR" not in _serve_env(monkeypatch, tmp_path)
+    assert "REMEDY_BUNDLED_WEBUI_DIR" not in launcher.child_env(None)

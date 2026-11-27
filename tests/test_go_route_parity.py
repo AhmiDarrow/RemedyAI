@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from remedy.interfaces.cli.cmd_runtime import resolve_remedy_runtime_command
+from remedy.interfaces.cli.launcher import resolve_remedy_runtime_command
 
 ROOT = Path(__file__).resolve().parents[1]
 GO_MOD = ROOT / "native" / "go"
