@@ -1,6 +1,6 @@
-"""``python -m remedy`` → the same CLI as ``remedy`` / ``python -m remedy.interfaces.cli``."""
+"""``python -m remedy`` → the same launcher as ``remedy``."""
 
-from remedy.interfaces.cli.main import main
+from remedy.interfaces.cli.launcher import main
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,6 @@ import json
 import sys
 from pathlib import Path
 
-from remedy.interfaces.cli.parser import build_parser
 from remedy.interfaces.messenger_settings import list_messenger_definitions
 
 
@@ -15,24 +14,6 @@ def test_gateway_package_is_gone() -> None:
     assert importlib.util.find_spec("remedy.gateway") is None
     assert "remedy.gateway" not in sys.modules
     assert importlib.util.find_spec("remedy.interfaces.messenger_catalog") is None
-
-
-def test_cli_parser_still_exposes_gateway() -> None:
-    ns = build_parser().parse_args(["gateway", "channels"])
-    assert ns.command == "gateway"
-    assert ns.gateway_cmd == "channels"
-
-
-def test_gateway_start_fails_closed_to_go() -> None:
-    from remedy.interfaces.cli.cmd_gateway import run_gateway_start
-
-    try:
-        run_gateway_start()
-    except SystemExit as ei:
-        msg = str(ei)
-        assert "remedy-runtime" in msg or "Go" in msg
-    else:
-        raise AssertionError("expected SystemExit")
 
 
 def test_settings_catalog_loads_go_json_ssot() -> None:

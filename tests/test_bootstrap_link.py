@@ -82,25 +82,3 @@ def test_wait_for_link_gives_up_without_a_runtime(
     assert link == ""
 
 
-def test_remedy_open_prints_and_opens_link(
-    runtime: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from remedy.interfaces.cli import cmd_runtime
-    from remedy.interfaces.cli.parser import build_parser
-
-    monkeypatch.setenv("REMEDY_API_KEY", TOKEN)
-    opened: list[str] = []
-    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
-    port = runtime.rsplit(":", 1)[1]
-    args = build_parser().parse_args(["--home", str(tmp_path), "open", "--port", port])
-    cmd_runtime._cmd_open(args)
-    assert opened and opened[0].startswith(runtime + "/?bootstrap=")
-
-
-def test_remedy_open_refuses_non_loopback(tmp_path: Path) -> None:
-    from remedy.interfaces.cli import cmd_runtime
-    from remedy.interfaces.cli.parser import build_parser
-
-    args = build_parser().parse_args(["--home", str(tmp_path), "open", "--host", "10.0.0.5"])
-    with pytest.raises(SystemExit):
-        cmd_runtime._cmd_open(args)
