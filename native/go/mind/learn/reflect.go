@@ -8,14 +8,16 @@ import (
 	"strings"
 )
 
-// tstep is a TraceStep (reflection.py 17-26); arguments are never present on
-// this path, the runtime does not send them.
+// tstep is a TraceStep (reflection.py 17-26). The runtime never sends
+// arguments; `remedy learn reflect --steps` does, and only their keys are
+// kept (argKeys, already str()'d), because only the keys reach the skill.
 type tstep struct {
 	tool    string
 	success bool
 	summary string // at most 200 characters
 	err     string
 	dur     float64
+	argKeys []string
 }
 
 type trace struct {
@@ -272,6 +274,14 @@ func buildInstructions(tr trace, patterns []toolSeq, eff effortScore) string {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("%d. **%s** [SUCCESS]", i+1, s.tool))
+		if len(s.argKeys) > 0 {
+			// Keep arg keys only (py 352-356): sorted, first 12.
+			keys := append([]string(nil), s.argKeys...)
+			sort.Strings(keys)
+			if k := strings.Join(keys[:min(12, len(keys))], ", "); k != "" {
+				lines = append(lines, "   - Argument keys: `"+k+"`")
+			}
+		}
 		if s.summary != "" {
 			lines = append(lines, "   - Result sketch: "+rcut(s.summary, 240))
 		}

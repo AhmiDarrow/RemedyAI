@@ -1,0 +1,12 @@
+author: Remedy
+description: Auto skill that was learned from a trace, with a fairly long description
+  so the dumper has to fold it across lines at eighty columns
+instructions: Body only, no resources.
+name: learned-fixture
+source: remedy-export
+tags:
+- probation
+- auto-generated
+title: learned-fixture
+type: skill
+version: '1.1'
