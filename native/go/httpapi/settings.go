@@ -361,6 +361,10 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		_ = s.approvals.SyncFromConfig(cfg)
 	}
 	s.refreshConnectAfterSettings()
+	// Turning web tools off stops the local search engine; on starts it.
+	if _, ok := patch["web_tools_enabled"]; ok {
+		s.searchHost.Apply()
+	}
 	// Turning ClaimIDX or its public sharing on or off takes effect now.
 	if _, ok := patch["claimidx_enabled"]; ok {
 		s.claimidx.Apply()

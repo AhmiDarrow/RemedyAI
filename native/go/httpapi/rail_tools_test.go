@@ -164,7 +164,7 @@ func TestComputerSnapshotRailWhenHostConnected(t *testing.T) {
 	home := t.TempDir()
 	b := newHostBridge(home)
 	b.markHostAlive(true, "rust")
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}

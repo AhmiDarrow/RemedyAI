@@ -9,14 +9,16 @@ import (
 )
 
 // CodingPackABI is the mid-build / local tool allowlist (Go Tool ABI ids).
-// Keeps coding + mission + memory/skills + light web; drops the long tail.
+// Keeps the file tools, the shell, memory/skills and light web; drops the
+// long tail. These must be ids the registry has: a list of the old
+// workspace.* names left a local model with no file or shell tool at all once
+// its context filled.
 var CodingPackABI = []string{
-	"workspace.read", "workspace.list", "workspace.write", "workspace.edit", "workspace.search",
-	"shell.exec",
+	"read", "edit", "write", "glob", "grep",
+	"bash", "jobs", "todo",
 	"memory.search", "memory.save",
 	"skill.search", "skill.activate",
 	"web.fetch", "web.search",
-	"mission.start", "mission.status", "mission.update", "mission.verify", "mission.complete",
 }
 
 // localDefaultContextWindow is the conservative n_ctx assumed for a loopback
@@ -199,10 +201,7 @@ func filterToolsCodingPack(tools []map[string]any, nameOnly bool) []map[string]a
 
 func codingNameFuzzy(name string) bool {
 	n := strings.ToLower(name)
-	return strings.Contains(n, "workspace") ||
-		strings.Contains(n, "shell") ||
-		strings.Contains(n, "mission") ||
-		strings.Contains(n, "memory") ||
+	return strings.Contains(n, "memory") ||
 		strings.Contains(n, "skill") ||
 		strings.HasPrefix(n, "web_") ||
 		strings.HasPrefix(n, "file_") ||

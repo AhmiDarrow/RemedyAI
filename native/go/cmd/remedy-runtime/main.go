@@ -158,7 +158,9 @@ func serveRuntime(addr, home string, smoke bool, onBound func(string)) int {
 		VisionWorker: visionWorker,
 		// The real runtime keeps the managed ClaimIDX host (off in --smoke runs).
 		ManageClaimidx: !smoke,
-		HomeDir:        home,
+		// So does the local search engine web.search prefers.
+		ManageSearchHost: !smoke,
+		HomeDir:          home,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 		if onBound != nil {

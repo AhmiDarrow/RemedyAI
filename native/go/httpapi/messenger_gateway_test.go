@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -59,5 +60,36 @@ func TestResolveMessengerSessionCreatesWhenUnfocused(t *testing.T) {
 	}
 	if got.OriginChannel == nil || *got.OriginChannel != "telegram" {
 		t.Fatalf("origin=%v", got.OriginChannel)
+	}
+}
+
+// With messenger_join_desktop off, a sender gets a conversation of their own
+// and the open desktop conversation is not bound to their chat.
+func TestResolveMessengerSessionKeepsToItselfWhenJoiningIsOff(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("[advanced]\nmessenger_join_desktop = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSessionStore(filepath.Join(home, "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	desk, err := store.Create(createSessionRequest{Title: "Private notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{sessions: store, homeDir: home}
+	s.SetFocusedSession(desk.ID)
+
+	got, err := s.resolveMessengerSession("telegram", "42", "sam", "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID == desk.ID || got.ID != "msg:telegram:42" {
+		t.Fatalf("sender joined the desktop conversation: id=%s", got.ID)
+	}
+	if fresh, _, _ := store.Get(desk.ID); fresh.OriginChannel != nil || fresh.ExternalChatID != nil {
+		t.Fatalf("desktop conversation was bound to the chat: %#v", fresh)
 	}
 }

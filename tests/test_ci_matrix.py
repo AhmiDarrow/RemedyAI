@@ -112,47 +112,18 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
     assert "tauri build --bundles deb,appimage" in linux
 
 
-def test_release_ships_the_worker_dependency_directory() -> None:
-    """A packaged worker runs a stdlib-only CPython.
-
-    The zipapp carries src/remedy; pydantic/PyYAML cannot live inside it
-    (compiled extensions) so they are staged beside it and bundled as a Tauri
-    resource, exactly like remedy_core.dll.
-    """
+def test_release_ships_no_python_worker() -> None:
+    """The runtime starts no Python: no release job builds or bundles a worker."""
     import json
 
-    jobs = _workflow_jobs("desktop-release.yml")
-    for runtime_job, tauri_job in (
-        ("build-runtime", "build-tauri"),
-        ("build-runtime-linux", "build-tauri-linux"),
-    ):
-        job = jobs[runtime_job]
-        runs = _run_commands(job)
-        assert "build_rmdy_worker.py" in runs, f"{runtime_job} must build the worker zipapp"
-        assert "--deps-out desktop/bin/rmdy-deps" in runs, (
-            f"{runtime_job} must stage the worker dependency directory"
-        )
-        upload = _uses_step(job, "actions/upload-artifact")
-        paths = str((upload.get("with") or {}).get("path", ""))
-        assert "desktop/bin/rmdy_tool_worker.pyz" in paths
-        assert "desktop/bin/rmdy-deps/**" in paths, (
-            f"{runtime_job} must upload the dependency directory for the bundle job"
-        )
-        needs = jobs[tauri_job].get("needs")  # type: ignore[union-attr]
-        needs = [needs] if isinstance(needs, str) else needs
-        assert needs and runtime_job in needs, (
-            f"{tauri_job} must consume {runtime_job}: deps are staged before bundling"
-        )
-
-    for conf in ("tauri.windows.conf.json", "tauri.linux.conf.json"):
+    text = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
+    assert "rmdy" not in text, "the release workflow still builds or uploads the Python worker"
+    for conf in ("tauri.windows.conf.json", "tauri.linux.conf.json", "tauri.macos.conf.json"):
         payload = json.loads(
             (ROOT / "desktop" / "src-tauri" / conf).read_text(encoding="utf-8")
         )
-        resources = payload["bundle"]["resources"]
-        assert resources["../bin/rmdy_tool_worker.pyz"] == "rmdy_tool_worker.pyz"
-        assert resources["../bin/rmdy-deps"] == "rmdy-deps", (
-            f"{conf} must bundle the worker dependency directory beside the zipapp"
-        )
+        resources = json.dumps(payload["bundle"]["resources"])
+        assert "rmdy" not in resources, f"{conf} still bundles the Python worker"
 
 
 def test_zig_build_defaults_to_baseline_cpu() -> None:

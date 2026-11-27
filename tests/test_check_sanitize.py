@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -21,6 +23,11 @@ def _load():
 
 
 def test_sanitize_script_exits_clean_on_current_tree() -> None:
+    # A Windows worktree read from WSL: its .git file names a Windows path, so
+    # git cannot list the files there. The Windows run covers this tree.
+    probe = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=ROOT, capture_output=True)
+    if probe.returncode != 0:
+        pytest.skip("git cannot read this checkout from here")
     # Windows CI can emit non-UTF8 bytes (e.g. em dash 0x97) on stdout; decode
     # lossily so a clean exit is not masked by a reader-thread UnicodeError.
     proc = subprocess.run(

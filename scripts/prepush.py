@@ -223,6 +223,9 @@ NATIVE = Lane(
     "native",
     "Go + Zig native runtime",
     (
+        # First, so the Go tests that spawn a process load the core this tree
+        # builds. Without it they skip, and a wrong one went unseen.
+        Step("zig build release-safe", "zig build -Doptimize=ReleaseSafe", cwd="native/zig"),
         Step("go test", "go test ./...", cwd="native/go"),
         Step("go race", "go test -race ./...", cwd="native/go"),
         Step("go vet", "go vet ./...", cwd="native/go"),
@@ -241,7 +244,6 @@ NATIVE = Lane(
         ),
         Step("zig test", "zig build test", cwd="native/zig"),
         Step("zig test release-safe", "zig build test -Doptimize=ReleaseSafe", cwd="native/zig"),
-        Step("zig build release-safe", "zig build -Doptimize=ReleaseSafe", cwd="native/zig"),
         # SHA-NI / host-ISA bake must not ship (0.62.1 connecting hang on Comet Lake).
         Step(
             "remedy_core ISA baseline",

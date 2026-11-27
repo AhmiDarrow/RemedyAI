@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -23,8 +24,7 @@ import (
 // tool id, and the CLI and the local tool API still call them. The model
 // never sees them (modelHiddenToolIDs).
 
-// goWorkspaceToolIDs are the tools RegisterWorkspaceTools serves in Go.
-// RegisterPythonWorkerTools skips them.
+// goWorkspaceToolIDs are the tools RegisterWorkspaceTools serves.
 var goWorkspaceToolIDs = map[string]struct{}{
 	"text.slugify": {}, "text.word_count": {},
 	"workspace.read": {}, "workspace.list": {}, "workspace.write": {},
@@ -54,13 +54,12 @@ func RegisterWorkspaceTools(registry *Registry) error {
 		"workspace.edit":   execWorkspaceEdit,
 		"workspace.search": execWorkspaceSearch,
 	}
-	for _, r := range pythonWorkerToolSpecs() {
+	for _, r := range nativeToolSpecs() {
 		exec, ok := execs[r.id]
 		if !ok {
 			continue
 		}
-		desc := strings.Replace(r.desc, " in the Python worker", "", 1)
-		desc = strings.Replace(desc, " (ripgrep or Python fallback)", "", 1)
+		desc := r.desc
 		if err := registry.Register(Descriptor{
 			ID:           r.id,
 			Version:      1,
@@ -882,4 +881,26 @@ func execWorkspaceSearch(ctx context.Context, request Request) (Result, error) {
 		"truncated": capped || g.Truncated,
 	})
 	return Result{Output: raw}, err
+}
+
+func slugify(text string) string {
+	var b strings.Builder
+	lastHyphen := true
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if !lastHyphen {
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func wordCount(text string) int {
+	fields := strings.Fields(text)
+	return len(fields)
 }
