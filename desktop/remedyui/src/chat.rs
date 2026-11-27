@@ -73,7 +73,8 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                         l.height = Length::Percent(1.0);
                     })
                 })
-                .child(depth::panels::side(ui, studio.clone())),
+                .child(depth::panels::side(ui, studio.clone(), depth::SidePanel::Memory))
+                .child(depth::panels::side(ui, studio.clone(), depth::SidePanel::Skills)),
         )
         .child(depth::banners::ticker(ui, studio.clone()))
         .child(depth::banners::library(ui, studio.clone()))
