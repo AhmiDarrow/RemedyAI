@@ -85,6 +85,22 @@ func skIsFile(p string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
+// skHasFileNamed reports a regular file in dir spelled exactly name. On
+// Windows and macOS os.Stat answers for any case, and an OpenClaw skill.md is
+// not a SKILL.md: only the first maps title to name.
+func skHasFileNamed(dir, name string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if e.Name() == name {
+			return skIsFile(filepath.Join(dir, name))
+		}
+	}
+	return false
+}
+
 func skIsDir(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
@@ -346,13 +362,13 @@ func skLoadOpenClaw(dir string) (*skSkill, error) {
 	var fm skMap
 	var body, manifest string
 	switch upper, lower, yml := filepath.Join(root, "SKILL.md"), filepath.Join(root, "skill.md"), filepath.Join(root, "skill.yaml"); {
-	case skIsFile(upper):
+	case skHasFileNamed(root, "SKILL.md"):
 		var err error
 		if fm, body, err = skParseSkillMD(upper); err != nil {
 			return nil, err
 		}
 		manifest = upper
-	case skIsFile(lower):
+	case skHasFileNamed(root, "skill.md"):
 		var err error
 		if fm, body, err = skParseSkillMD(lower); err != nil {
 			return nil, err
