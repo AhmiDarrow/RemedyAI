@@ -1,8 +1,8 @@
 """CLI: serve / chat / desktop.
 
 Production ``remedy serve`` launches Go ``remedy-runtime`` (API authority on
-``:7400``). Python does not bind the local HTTP server — keep
-``python -m remedy.runtime.rmdy_tool_worker`` for the RMDY tool worker.
+``:7400``). Python does not bind the local HTTP server and the runtime
+starts no Python worker.
 """
 
 from __future__ import annotations

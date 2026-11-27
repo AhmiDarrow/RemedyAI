@@ -3,13 +3,11 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
-	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -335,17 +333,8 @@ func TestBindToolInputBindsMemorySaveSession(t *testing.T) {
 	}
 }
 
-type failFrameCaller struct{}
-
-func (failFrameCaller) Call(context.Context, protocol.Frame) (protocol.Frame, error) {
-	return protocol.Frame{}, errors.New("no worker")
-}
-
 func TestMemorySkillToolsAreGoAndRegisteredOnce(t *testing.T) {
 	reg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerTools(reg, failFrameCaller{}); err != nil {
-		t.Fatal(err)
-	}
 	if err := RegisterMemorySkillTools(reg, func() *Server { return nil }); err != nil {
 		t.Fatal(err)
 	}

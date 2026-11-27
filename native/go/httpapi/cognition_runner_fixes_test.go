@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +19,6 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
-	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
@@ -377,7 +375,7 @@ func TestParseToolTokensCarryIDs(t *testing.T) {
 }
 
 func TestMessengerOriginForcesAskUnderAuto(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +449,7 @@ func TestHiveAskLandsOnParentSession(t *testing.T) {
 		t.Fatalf("owner origin=%q", got)
 	}
 
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,27 +602,14 @@ func TestAttachmentImageReachesTheProviderPayload(t *testing.T) {
 	}
 }
 
-func TestHistoryIsNotAlsoSentToPromptAssemble(t *testing.T) {
+func TestHistoryIsNotAlsoRenderedIntoThePrompt(t *testing.T) {
 	// The transcript carries prior turns as real messages now, so history must
 	// not be rendered into the system block as well (it would appear twice).
-	serverReg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
-		t.Fatal(err)
-	}
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
-	client := ipc.NewClient(clientConn)
-	defer client.Close()
-
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{{{Text: "ok", Done: true}}}}
 	r := NewCognitionTurnRunner(model)
-	if err := r.AttachPythonWorker(client); err != nil {
-		t.Fatal(err)
-	}
+	r.forcePrimary = model
+	r.HomeDir = t.TempDir()
+	r.PromptSources = serverPromptSources{}
 	history := []map[string]any{{"role": "user", "content": "the earlier question"}}
 	if _, err := CollectTokens(context.Background(), r, TurnRequest{
 		Prompt: "the new one", SessionID: "s-hist", History: history,

@@ -80,7 +80,18 @@ func TestSecretsStayClosedThroughShortNamesAndJunctions(t *testing.T) {
 			t.Errorf("%q reaches the secrets folder", argv)
 		}
 	}
-	if spawnNamesSecret([]string{"findstr", ".", "notes.txt"}, base) || spawnNamesSecret([]string{"git", "status"}, base) {
+	// Run from the home folder, the secret needs no home in its spelling, and
+	// a file that is not there yet is judged by where it would land.
+	for _, argv := range [][]string{
+		{"findstr", ".", `auth\local_api_token`},
+		{"cmd.exe", "/c", "copy notes.txt auth/new_file"},
+	} {
+		if !spawnNamesSecret(argv, home) {
+			t.Errorf("%q from the home folder reaches the secrets folder", argv)
+		}
+	}
+	if spawnNamesSecret([]string{"findstr", ".", "notes.txt"}, base) || spawnNamesSecret([]string{"git", "status"}, base) ||
+		spawnNamesSecret([]string{"git", "log", "--author=x"}, home) {
 		t.Error("ordinary commands still run")
 	}
 	for _, p := range []string{

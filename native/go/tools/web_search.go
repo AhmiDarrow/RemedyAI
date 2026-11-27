@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -282,10 +283,21 @@ func (c *webClient) openserpHealthy(ctx context.Context) bool {
 	return err == nil
 }
 
-// openserpRows queries the managed loopback OpenSERP. Starting or downloading
-// it is not done here: the Python worker still owns that (_start_local_search).
+// searchHostNudge asks whoever manages the local engine to start it. The
+// runtime sets it (httpapi/search_host.go); it returns at once.
+var searchHostNudge atomic.Pointer[func()]
+
+// SetSearchHostNudge installs the function web.search calls when it finds the
+// local engine down.
+func SetSearchHostNudge(fn func()) { searchHostNudge.Store(&fn) }
+
+// openserpRows queries the managed loopback OpenSERP. When it is down this
+// search takes the fallback and the engine is asked to start for the next one.
 func (c *webClient) openserpRows(ctx context.Context, q string, n int, timeout time.Duration) ([]searchRow, error) {
 	if !c.openserpHealthy(ctx) {
+		if fn := searchHostNudge.Load(); fn != nil && *fn != nil {
+			(*fn)()
+		}
 		return nil, errors.New("openserp not healthy")
 	}
 	base := strings.TrimRight(c.openserpBase, "/")

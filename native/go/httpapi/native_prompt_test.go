@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +27,7 @@ func TestTheRunnerBuildsItsPromptInGo(t *testing.T) {
 	if bare.nativeOn() {
 		t.Fatal("a runner without stores must not claim a native prompt")
 	}
-	if _, err := bare.assemblePrompt(context.Background(), req); err == nil {
+	if _, err := bare.assemblePrompt(req); err == nil {
 		t.Fatal("with neither stores nor a worker, assembling must fail, not send an empty prompt")
 	}
 
@@ -37,7 +36,7 @@ func TestTheRunnerBuildsItsPromptInGo(t *testing.T) {
 	if !r.nativeOn() {
 		t.Fatal("native prompt is the default")
 	}
-	got, err := r.assemblePrompt(context.Background(), req)
+	got, err := r.assemblePrompt(req)
 	if err != nil {
 		t.Fatal(err)
 	}
