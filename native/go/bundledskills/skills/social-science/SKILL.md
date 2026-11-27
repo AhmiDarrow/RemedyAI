@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, social-science, survey, psychometrics, causal-inference, ethics]
 requires: []
-tools: [power_analysis, stats_assumptions, stats_effect_size, stats_multiplicity, data_profile, analysis_run, analysis_ledger, manuscript_check, lit_search, cite_add, skill_activate, file_read, file_write]
+tools: [power_analysis, stats_assumptions, stats_effect_size, stats_multiplicity, data_profile, analysis_run, analysis_ledger, manuscript_check, lit_search, cite_add, skill.activate, read, write]
 triggers:
   - '\b(survey (?:instrument|design|weights?)|Likert (?:scale|items?)|questionnaire (?:validity|items?)|sampling frame)\b'
   - '\b(difference[- ]in[- ]differences|instrumental variables?|regression discontinuity|propensity scores?|fixed effects? model)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Social science method
 
-Run `skill_activate(skill="research-method")` first and work from that spine —
+Run `skill.activate(skill="research-method")` first and work from that spine —
 question framing, evidence standards, preregistration, citation honesty, how to
 say "we do not know". Do not restate it. This pack covers only what changes when
 the units of analysis are people: they can guess the hypothesis, refuse, drop
@@ -61,7 +61,7 @@ out, be measured badly, and cannot usually be randomised.
    de-identification, storage and retention are decided before collection.
    `references/human-subjects-ethics.md`.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.
 
 ## Running it
 

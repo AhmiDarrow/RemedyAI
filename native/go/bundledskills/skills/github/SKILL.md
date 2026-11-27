@@ -6,7 +6,7 @@ description: >
 version: 1.0.0
 author: Remedy
 tags: [github, gh, pr, git, ci, open-source]
-tools: [bash_exec, file_read, list_dir]
+tools: [bash, read, glob]
 ---
 
 # GitHub (gh + git)

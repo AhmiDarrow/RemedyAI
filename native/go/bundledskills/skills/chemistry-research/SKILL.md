@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, chemistry, cheminformatics, spectroscopy, dft, safety]
 requires: []
-tools: [lit_search, lit_fetch, cite_add, cite_check, analysis_env, analysis_run, analysis_ledger, data_profile, stats_effect_size, manuscript_build, skill_activate, file_read, file_write]
+tools: [lit_search, lit_fetch, cite_add, cite_check, analysis_env, analysis_run, analysis_ledger, data_profile, stats_effect_size, manuscript_build, skill.activate, read, write]
 triggers:
   - '\b(1H NMR|13C NMR|\bNMR\b spectr\w+|IR spectr\w+|mass spectrometry|\bHPLC\b|GC-?MS|LC-?MS|\bXRD\b)\b'
   - '\b(reaction (?:yield|scheme|conditions)|stoichiometr\w+|molar (?:ratio|mass)|equivalents of|reflux|recrystalli[sz]\w+|column chromatograph\w+)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Chemistry research
 
-Activate `research-method` first: `skill_activate(skill="research-method")`.
+Activate `research-method` first: `skill.activate(skill="research-method")`.
 It owns question framing, evidence standards, citation honesty and how to say
 "we do not know". Do not restate it. This pack is what chemistry does
 differently.
@@ -107,4 +107,4 @@ measurement.
 - `cite_check(resolve=True)` returns PASS before the manuscript is done;
   `manuscript_build` reports no undefined citations.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.

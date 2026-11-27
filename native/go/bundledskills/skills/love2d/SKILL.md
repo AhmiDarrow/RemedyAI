@@ -10,7 +10,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, love2d, lua, engine]
 requires: []
-tools: [game_project_info, local_discover, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, game_playtest, computer_screenshot, vision_decode]
+tools: [game_project_info, local_discover, bash, read, write, edit, grep, glob, game_playtest, computer.screenshot, vision_decode]
 triggers:
   - "\\b(love2d|löve|love 2d|love 11|main\\.lua|conf\\.lua|lua game)\\b"
 local:
@@ -29,7 +29,7 @@ use `lovec` (Windows console build).
 
 ## Fingerprint
 
-1. `game_project_info(path)`; `file_read main.lua`, `conf.lua` (window size,
+1. `game_project_info(path)`; `read main.lua`, `conf.lua` (window size,
    title, `t.version = "11.5"`, modules enabled).
 2. Layout: `lib/` for third-party (`anim8`, `bump`, `hump`, `lume`),
    `src/` or flat modules, `assets/` for images/sounds/fonts.
@@ -68,10 +68,10 @@ state/scene pattern and a module layout.
    with `std = "love"` or `globals = {"love"}`; write one if missing.
 3. `busted` — tests for pure Lua modules (no `love.*` calls). Setup and a
    fake-`love` shim: `references/testing.md`.
-4. Launch: `bash_exec("lovec .")` from the project root (or `love .`) —
+4. Launch: `bash("lovec .")` from the project root (or `love .`) —
    auto-backgrounded because it opens a window. Then
    `game_playtest(command="lovec .", seconds=…, keys=…, question=…)` or
-   `computer_screenshot` + `vision_decode`. A blue error screen or a
+   `computer.screenshot` + `vision_decode`. A blue error screen or a
    traceback on stderr means it did **not** run — quote the line.
 
 ## Sprites, quads, animation

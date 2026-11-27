@@ -68,7 +68,7 @@ Canonical chapter: `docs/manual/computer-use-soak.md`.
 Minimum path:
 
 1. `computer_monitors` → ≥1 display  
-2. `computer_screenshot` → PNG under home `computer/shots/`  
+2. `computer.screenshot` → PNG under home `computer/shots/`  
 3. `computer_snapshot` → window refs  
 4. Browser: navigate in-rail, snapshot `eN`, click, stop cancels jobs  
 5. Offline: navigate does not surprise-open OS browser  

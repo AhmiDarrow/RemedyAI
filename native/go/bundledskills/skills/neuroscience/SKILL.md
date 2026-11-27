@@ -13,7 +13,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, neuroscience, fmri, eeg, electrophysiology, imaging, statistics]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_profile, stats_assumptions, stats_multiplicity, power_analysis, lit_search, cite_add, skill_activate]
+tools: [analysis_env, analysis_run, analysis_ledger, data_profile, stats_assumptions, stats_multiplicity, power_analysis, lit_search, cite_add, skill.activate]
 triggers:
   - '\b(fMRI|\bEEG\b|\bMEG\b|BOLD signal|diffusion MRI|\bDTI\b|resting[- ]state)\b'
   - '\b(spike (?:sorting|trains?)|local field potentials?|patch[- ]clamp|optogenetic\w*|two[- ]photon|calcium imaging)\b'
@@ -23,7 +23,7 @@ triggers:
 
 # Neuroscience (neural data and its inferences)
 
-Run `skill_activate(skill="research-method")` first and work off that spine —
+Run `skill.activate(skill="research-method")` first and work off that spine —
 question framing, evidence, preregistration, citation honesty, "we do not
 know". This pack covers only what neural data adds.
 
@@ -100,4 +100,4 @@ inputs and artifacts; the statistic survives its own correction over the
 real search space; the effect holds in data not used to select it — a held-
 out run, a split half, or a preregistered replication sample.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.

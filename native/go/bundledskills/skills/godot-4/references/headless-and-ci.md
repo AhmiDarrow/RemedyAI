@@ -43,7 +43,7 @@ func _init() -> void:
 
 ## Timeouts
 Headless boot of a small project: 2–10 s. Import of many textures: minutes.
-Pass `timeout_seconds` to `godot_run`/`bash_exec` accordingly. A scene that
+Pass `timeout_seconds` to `godot_run`/`bash` accordingly. A scene that
 never calls `quit()` runs until killed: always `--quit-after` or a script
 that quits.
 

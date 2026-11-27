@@ -5,12 +5,12 @@ description: >
   decide C++ vs Blueprint, build with UnrealBuildTool, cook/package with
   RunUAT BuildCookRun, run Automation tests via UnrealEditor-Cmd, generate
   project files. Use when a *.uproject exists or the owner mentions Unreal,
-  UE5, Blueprints, UBT or RunUAT. Knowledge-only — bash_exec and file tools.
+  UE5, Blueprints, UBT or RunUAT. Knowledge-only — bash and file tools.
 version: 1.0.0
 author: Remedy
 tags: [game, unreal, ue5, cpp, blueprint, uat, ubt]
 requires: []
-tools: [game_project_info, local_discover, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, game_playtest, computer_screenshot]
+tools: [game_project_info, local_discover, bash, read, write, edit, grep, glob, game_playtest, computer.screenshot]
 triggers:
   - "\\b(unreal|ue5|ue4|uproject|blueprints?|unrealbuildtool|runuat|ubt|uat)\\b"
 local:
@@ -28,7 +28,7 @@ has to do (Blueprint graphs, level layout, materials).
 
 ## Fingerprint (start here)
 
-1. `game_project_info(path)`, then `file_read <Name>.uproject` (JSON):
+1. `game_project_info(path)`, then `read <Name>.uproject` (JSON):
    `EngineAssociation` (`"5.4"` for launcher builds, a GUID for source
    builds), `Modules[]` (present ⇒ C++ project; absent ⇒ Blueprint-only),
    `Plugins[]`.
@@ -67,7 +67,7 @@ BlueprintReadWrite)`, `UFUNCTION(BlueprintCallable)`. More:
 
 - `<Name>Editor` target to compile for the editor; `<Name>` for a game
   binary. Configs: `Debug`, `DebugGame`, `Development`, `Shipping`.
-- First build of a module-heavy project: 10–60 min. Set `bash_exec` timeout
+- First build of a module-heavy project: 10–60 min. Set `bash` timeout
   to the max and say so. Incremental builds: seconds to minutes.
 - Errors: grep the output for `error C` (MSVC) and `: error` lines; UBT
   prints the failing file:line.

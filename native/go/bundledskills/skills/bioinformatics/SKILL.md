@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, bioinformatics, genomics, rna-seq, pipelines, reproducibility]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_multiplicity, lit_search, cite_add, skill_activate, bash_exec]
+tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_multiplicity, lit_search, cite_add, skill.activate, bash]
 triggers:
   - '\b(FASTQ|FASTA|\bBAM\b|SAM file|\bVCF\b|GTF file|BED file|CRAM file)\b'
   - '\b(RNA-?seq|scRNA-?seq|ChIP-?seq|ATAC-?seq|\bWGS\b|\bWES\b|variant calling|read (?:alignment|mapping))\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Bioinformatics (the dry lab)
 
-Call `skill_activate(skill="research-method")` first — it owns question
+Call `skill.activate(skill="research-method")` first — it owns question
 framing, evidence standards, preregistration, citation honesty and how to say
 "we do not know". Do not restate it. This pack is what is different about
 genomic data.
@@ -31,7 +31,7 @@ genomic data.
 1. `analysis_env(path)` — which of samtools, bcftools, bwa, STAR, salmon, R,
    snakemake, nextflow, conda/mamba, and a project python with pandas
    actually exist here. Nothing below runs in the sidecar; every real step
-   goes through `analysis_run` or `bash_exec` in the project environment.
+   goes through `analysis_run` or `bash` in the project environment.
 2. **Establish the reference build before touching a file.** GRCh37/hg19,
    GRCh38/hg38 or T2T-CHM13; Ensembl (`1`, `MT`) or UCSC (`chr1`, `chrM`)
    naming; the exact annotation release. Coordinates are meaningless without
@@ -93,4 +93,4 @@ reruns to the same outputs from the same inputs — `snakemake -n` clean,
 `analysis_ledger(action="verify")` reporting INTACT. "It ran without an
 error" is not verification: an aligner given the wrong reference exits 0.
 
-Read `references/INDEX.md`, then `file_read` what the task needs.
+Read `references/INDEX.md`, then `read` what the task needs.

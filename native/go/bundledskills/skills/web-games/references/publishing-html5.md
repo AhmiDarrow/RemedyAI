@@ -7,7 +7,7 @@ npm run build          # → dist/
 npm run preview        # serve dist/ locally on http://localhost:4173
 ```
 
-Preview before shipping: open it with `computer_navigate`, check the
+Preview before shipping: open it with `computer.navigate`, check the
 console, play a few seconds. `vite preview` is a server — background it.
 
 ## `base` matters
