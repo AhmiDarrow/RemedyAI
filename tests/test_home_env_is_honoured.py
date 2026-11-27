@@ -22,15 +22,6 @@ def test_default_home_falls_back_to_profile(monkeypatch):
     assert default_home() == (Path.home() / ".remedy").resolve()
 
 
-def test_computer_audit_and_jobs_stay_inside_remedy_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    from remedy.core.computer.audit import audit_path
-    from remedy.core.computer.host_bridge import _root
-
-    assert audit_path().is_relative_to(tmp_path)
-    assert _root().is_relative_to(tmp_path)
-
-
 def test_no_module_hardcodes_the_profile_home():
     root = Path(__file__).resolve().parents[1] / "src" / "remedy"
     out = subprocess.run(

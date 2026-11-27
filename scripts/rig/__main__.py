@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--use-host-key",
         action="store_true",
-        help="Borrow the stored key (and provider defaults) from the live install",
+        help="Take the key from the environment and the provider defaults from the live install",
     )
     run.add_argument("--gguf", default="", help="GGUF to serve locally and score")
     run.add_argument("--llama-server", default="", help="Path to llama-server binary")

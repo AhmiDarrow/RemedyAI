@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import re
 import sys
 import threading
@@ -111,21 +112,15 @@ _ORDER_RE = re.compile(r"place\s*order|order\s*placed|buy\s*now|confirm\s*purcha
 
 
 def load_token() -> str:
-    """Same bearer the desktop uses. DPAPI-wrapped tokens need the repo import."""
-    try:
-        import sys
+    """The API bearer: REMEDY_API_KEY, or a plain-format token file (dev).
 
-        repo_src = Path(__file__).resolve().parent.parent / "src"
-        if repo_src.is_dir():
-            sys.path.insert(0, str(repo_src))
-        from remedy.interfaces.local_auth import load_local_api_token
-
-        return load_local_api_token() or ""
-    except Exception:
-        pass
+    A token the runtime wrapped with the system secure store cannot be read
+    from here; set REMEDY_API_KEY for that case.
+    """
+    if os.environ.get("REMEDY_API_KEY", "").strip():
+        return os.environ["REMEDY_API_KEY"].strip()
     try:
         raw = (HOME / "auth" / "local_api_token").read_text(encoding="utf-8").strip()
-        # Plain-format token file (dev). DPAPI-wrapped needs the import above.
         if raw and not raw.startswith("{"):
             return raw
     except OSError:

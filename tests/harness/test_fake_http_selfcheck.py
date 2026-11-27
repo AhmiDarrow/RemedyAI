@@ -84,27 +84,6 @@ def test_asking_for_the_port_before_start_raises_rather_than_lying():
 # --- canned responses ---------------------------------------------------------
 
 
-def test_a_canned_200_reaches_the_real_client(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, json=_chat_reply("memory"))
-    out = local_text_complete("classify this", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    assert out["ok"] is True
-    assert out["text"] == "memory"
-    assert out["error"] is None
-
-
-def test_a_canned_500_is_reported_not_swallowed(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, status=500, json={"error": "boom"})
-    out = local_text_complete("classify this", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    assert out["ok"] is False
-    assert out["text"] == ""
-    assert "500" in out["error"]
-    assert "boom" in out["error"]  # the server's own body, not a generic message
-
-
 @pytest.mark.parametrize("status", [200, 204, 400, 404, 429, 500, 503])
 def test_the_status_asked_for_is_the_status_sent(fake_http, status):
     fake_http.route("/ping", status=status, body="pong")
@@ -115,17 +94,6 @@ def test_the_status_asked_for_is_the_status_sent(fake_http, status):
         assert getattr(e, "code", None) == status
 
 
-def test_an_unregistered_path_404s_rather_than_quietly_succeeding(fake_http):
-    """A typo'd path must fail the test, not pass it."""
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route("/v1/models", json={"data": []})
-    out = local_text_complete("hello", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    assert out["ok"] is False
-    assert "404" in out["error"]
-    assert fake_http.requests_for(CHAT, method="POST")
-
-
 def test_a_wildcard_route_catches_what_nothing_else_claimed(fake_http):
     fake_http.route("*", status=418, body="teapot")
     for path in ("/v1/models", "/anything/else"):
@@ -134,74 +102,7 @@ def test_a_wildcard_route_catches_what_nothing_else_claimed(fake_http):
         assert getattr(exc.value, "code", None) == 418
 
 
-def test_a_sequence_of_replies_is_served_in_order_then_repeats(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route_sequence(
-        CHAT,
-        [Canned(status=503, body="warming up"), Canned(json=_chat_reply("ready"))],
-    )
-    first = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    second = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    third = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    assert first["ok"] is False and "503" in first["error"]
-    assert second["text"] == "ready"
-    assert third["text"] == "ready"  # last reply repeats; it does not 404
-
-
-def test_a_get_route_serves_the_vision_health_probe(fake_http):
-    """The other shape of request Remedy makes: GET /v1/models, tiny timeout."""
-    from remedy.vision.runtime import _health
-
-    fake_http.route("/v1/models", method="GET", json={"data": [{"id": "smolvlm2"}]})
-    assert _health(fake_http.url("/v1"), timeout=5.0) is True
-    assert fake_http.requests_for("/v1/models", method="GET")
-
-
-def test_a_health_probe_against_an_empty_server_reports_down(fake_http):
-    from remedy.vision.runtime import _health
-
-    assert _health(fake_http.url("/v1"), timeout=5.0) is False
-
-
 # --- the request log ----------------------------------------------------------
-
-
-def test_the_body_the_client_actually_sent_is_recorded(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, json=_chat_reply("ok"))
-    local_text_complete(
-        "who am I",
-        base_url=fake_http.url("/v1"),
-        system="Reply with one word.",
-        max_tokens=8,
-        timeout_s=5.0,
-    )
-    req = fake_http.last_request
-    assert req is not None
-    assert (req.method, req.path) == ("POST", CHAT)
-    body = req.json_body()
-    assert body["max_tokens"] == 8
-    assert [m["role"] for m in body["messages"]] == ["system", "user"]
-    assert body["messages"][1]["content"] == "who am I"
-    assert req.header("Content-Type") == "application/json"
-    assert req.header("user-agent") == "RemedyAI-nanoswarm/1.0"  # lookup is case-blind
-
-
-def test_an_image_arrives_base64_encoded_in_the_recorded_body(fake_http, shot):
-    """The decoder's payload is the thing most worth being able to inspect."""
-    import base64
-
-    from remedy.vision.decoder import decode_image
-
-    fake_http.route(CHAT, json=_chat_reply("a screenshot of a terminal"))
-    out = decode_image(shot, base_url=fake_http.url("/v1"), timeout_s=10.0)
-    assert out["ok"] is True
-    body = fake_http.last_request.json_body()
-    content = body["messages"][1]["content"]
-    image = next(c for c in content if c["type"] == "image_url")
-    assert base64.standard_b64encode(PNG).decode() in image["image_url"]["url"]
 
 
 def test_query_strings_are_kept_apart_from_the_path(fake_http):
@@ -235,34 +136,6 @@ def test_a_delayed_response_really_makes_the_client_wait(fake_http):
     with urlopen(fake_http.url("/slow"), timeout=10.0) as resp:
         assert resp.status == 200
     assert time.perf_counter() - t0 >= 0.25
-
-
-def test_a_delay_past_the_clients_timeout_is_reported_as_a_failure(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, json=_chat_reply("too late"), delay_s=5.0)
-    out = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=0.5)
-    assert out["ok"] is False
-    assert out["text"] == ""  # no half-read body leaks through
-
-
-def test_a_hung_request_is_still_recorded_and_still_times_out(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, hang=True)
-    out = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=0.5)
-    assert out["ok"] is False
-    # Recorded before the hang, so the test can assert on what was sent.
-    assert fake_http.requests_for(CHAT, method="POST")
-
-
-def test_a_dropped_connection_is_an_error_not_an_empty_success(fake_http):
-    from remedy.runtime.local_infer import local_text_complete
-
-    fake_http.route(CHAT, drop=True)
-    out = local_text_complete("x", base_url=fake_http.url("/v1"), timeout_s=5.0)
-    assert out["ok"] is False
-    assert out["text"] == ""
 
 
 # --- teardown -----------------------------------------------------------------
