@@ -637,7 +637,7 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
             ui,
             [
                 ("Tokens", api::format_tokens(totals.total_tokens)),
-                ("Est. cost", api::format_cost(totals.estimated_cost_usd)),
+                ("Est. cost", api::cost_for(totals.estimated_cost_usd, totals.total_tokens, "not priced")),
                 ("Events", api::format_number(totals.events)),
                 // Share of input the provider served from its prompt cache, and how much.
                 ("From cache", api::cache_label(totals)),
@@ -827,7 +827,7 @@ fn provider_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 name_text(ui, api::provider_label(&row.provider)),
                 end_text(ui, api::format_tokens(row.totals.total_tokens), COL_TOKENS, false),
-                end_text(ui, api::format_cost(row.totals.estimated_cost_usd), COL_COST, false),
+                end_text(ui, api::cost_for(row.totals.estimated_cost_usd, row.totals.total_tokens, "—"), COL_COST, false),
                 end_text(ui, api::format_number(row.totals.events), COL_EVENTS, false),
             ],
             true,
@@ -854,7 +854,7 @@ fn model_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 model_name(ui, row),
                 end_text(ui, api::format_tokens(row.totals.total_tokens), COL_TOKENS, false),
-                end_text(ui, api::format_cost(row.totals.estimated_cost_usd), COL_COST, false),
+                end_text(ui, api::cost_for(row.totals.estimated_cost_usd, row.totals.total_tokens, "—"), COL_COST, false),
             ],
             true,
         ));

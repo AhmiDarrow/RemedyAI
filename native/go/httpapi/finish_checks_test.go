@@ -35,3 +35,27 @@ func TestFinishChecksPushOnlySmallModelsByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestHarnessFiguresSurviveARestart(t *testing.T) {
+	home := t.TempDir()
+	sid := "sess-keep"
+	out := cognition.Outcome{}
+	out.Context.Window, out.Context.Budget, out.Context.Estimate = 200_000, 168_000, 4_200
+	out.Context.ModelCalls = 3
+	out.Context.Steps = []cognition.ToolStep{{Name: "bash", OK: true}, {Name: "read", OK: false}}
+	recordHarness(home, sid, &out)
+	// A restart: nothing in memory, the same home.
+	harness.Lock()
+	harness.bySession = map[string]*sessionHarness{}
+	harness.latest = ""
+	harness.Unlock()
+	setHarnessHome(home)
+	got := harnessFor(sid)
+	if got.Turns != 1 || got.Estimate != 4_200 || got.Steps != 2 || got.StepsOK != 1 || got.ModelCalls != 3 {
+		t.Fatalf("saved figures were not read back: %+v", got)
+	}
+	// With no session named, the one that ran last.
+	if last := harnessFor(""); last.Turns != 1 {
+		t.Fatalf("the latest session's figures were not found: %+v", last)
+	}
+}

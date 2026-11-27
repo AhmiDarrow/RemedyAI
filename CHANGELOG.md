@@ -34,6 +34,11 @@ All notable changes to Remedy are documented here.
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.
 
 ### Fixed
+- An interrupt (Ctrl+Enter) no longer loses the message. It was sent while the old turn was still winding down, the runtime refused it as busy, and the desktop reported it as delivered; the old turn was stopped and nothing answered. The new turn now starts when the old one has ended, a refusal is retried, and a message that still cannot be sent stays queued and says so. The runtime also reads the interrupt reason the desktop sends, so the stopped reply is marked as interrupted.
+- Usage, Harness keeps its figures across a restart of the runtime (they are saved with each session). They read zero until the next turn finished.
+- Usage shows "not priced" where tokens were used and no cost is recorded. Remedy has no price list; "$0.00" read as free.
+- The note left on a stopped reply no longer shows stray asterisks.
+- Remedy has one face on every part of the desktop. Each face used to be drawn once, from the usage figures loaded at that moment, so Grove at startup could show a stand-in while Studio showed the grown one. The face is now stored (`face.state`), every surface draws that one, it only grows forward over time, and a new or restored face shows everywhere within a few seconds.
 - Desktop, Documents and Downloads were looked for under the home folder by name, so a Desktop that Windows keeps elsewhere (under OneDrive, say) was missing from the Files rail and from what Remedy may read. Their places now come from the system, on Linux from `user-dirs.dirs`.
 - A theme picked in Settings changed only some of the window until a restart. The whole window now takes it at once.
 - The edges of the side panes and of the chat split did not show that they can be dragged. They are a clearer line now, light up under the pointer, and the pointer becomes a resize arrow.

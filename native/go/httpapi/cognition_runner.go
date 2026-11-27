@@ -251,7 +251,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	}
 	// Runs after the reply; a failure never changes the finished turn.
 	defer r.scheduleTurnEnd(req, &out)
-	defer recordHarness(req.SessionID, &out)
+	defer recordHarness(r.HomeDir, req.SessionID, &out)
 	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
 	var (
