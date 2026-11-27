@@ -21,7 +21,7 @@ pub(crate) use actions::{
     apply_picked_project_path, pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
     rename_session, request_plan_changes, resolve_approval, more_library, save_skill, search_library,
-    search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
+    search_memory, send_life, show_plan, speak_reply, submit, toggle_mic,
     trust_skill, visible_approval,
 };
 pub(crate) use markdown::{blocks, inline_rich};
@@ -260,7 +260,6 @@ pub struct Depth {
     pub jobs: Signal<Vec<StreamJob>>,
     pub queue: Signal<Vec<Queued>>,
     next_queue: Signal<u64>,
-    pub stall_hidden: Signal<bool>,
     pub tick: Signal<u64>,
     pub voice: Signal<VoicePrefs>,
     pub mic_on: Signal<bool>,
@@ -352,7 +351,6 @@ impl Depth {
             jobs: Signal::new(Vec::new()),
             queue: Signal::new(Vec::new()),
             next_queue: Signal::new(1),
-            stall_hidden: Signal::new(false),
             tick: Signal::new(0),
             voice: Signal::new(VoicePrefs::default()),
             mic_on: Signal::new(false),

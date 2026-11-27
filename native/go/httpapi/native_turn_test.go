@@ -10,10 +10,11 @@ func TestTurnHistoryWindowMovesInSteps(t *testing.T) {
 	// The first carried message is total-window; it must stay put for a run
 	// of turns, then jump, and the window never drops below the minimum.
 	prevStart, moves := -1, 0
-	for total := 0; total <= 120; total++ {
+	const upTo = 3 * turnHistoryMessages
+	for total := 0; total <= upTo; total++ {
 		w := turnHistoryWindow(total)
-		if total >= turnHistoryMessages && (w < turnHistoryMessages || w >= 2*turnHistoryMessages) {
-			t.Fatalf("total %d: window %d outside [%d, %d)", total, w, turnHistoryMessages, 2*turnHistoryMessages)
+		if total >= turnHistoryMessages && (w < turnHistoryMessages || w >= turnHistoryMessages+turnHistoryBlock) {
+			t.Fatalf("total %d: window %d outside [%d, %d)", total, w, turnHistoryMessages, turnHistoryMessages+turnHistoryBlock)
 		}
 		start := total - w
 		if start < 0 {
@@ -27,8 +28,8 @@ func TestTurnHistoryWindowMovesInSteps(t *testing.T) {
 		}
 		prevStart = start
 	}
-	if moves > 120/turnHistoryMessages+1 {
-		t.Fatalf("the window start moved %d times over 120 messages; it should move about every %d", moves, turnHistoryMessages)
+	if moves > upTo/turnHistoryBlock+1 {
+		t.Fatalf("the window start moved %d times over %d messages; it should move about every %d", moves, upTo, turnHistoryBlock)
 	}
 }
 

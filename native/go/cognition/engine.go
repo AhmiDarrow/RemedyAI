@@ -3,6 +3,7 @@ package cognition
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/tokens"
 )
 
 var (
@@ -154,9 +157,6 @@ type Config struct {
 	// SoftEpochSteps refresh the brief every N model rounds (default 64).
 	// Zero-value Config uses the default; set -1 to disable soft epochs.
 	SoftEpochSteps int
-	// MaxStaleEpochs stops after this many consecutive soft epochs with
-	// zero tool activity (default 8). Failed tools still count as activity.
-	MaxStaleEpochs int
 	// KeepLastResults how many outcome lines the epoch ledger keeps (default 32).
 	KeepLastResults int
 	// MaxResultChars caps each tool output retained for the model.
@@ -169,10 +169,11 @@ type Config struct {
 	// MaxRearms caps unfinished-work / agency re-arms after text-only stops (default 8).
 	MaxRearms        int
 	MaxParallelTools int
-	// MaxRepeatedBatch is how many consecutive identical batches trigger the
-	// progress gate (default 2 — i.e. the third identical batch).
+	// MaxRepeatedBatch is how many times in a row the same batch may come
+	// back with the same results before the next identical request is
+	// refused with a nudge (default 3: four identical runs, the fifth refused).
 	MaxRepeatedBatch int
-	// RepeatNudgeBudget allows that many nudges before ErrNoProgress (default 1).
+	// RepeatNudgeBudget allows that many nudges before ErrNoProgress (default 3).
 	RepeatNudgeBudget int
 	ModelRetries      int
 	RetryBackoff      time.Duration
@@ -217,9 +218,6 @@ func (c Config) normalized() Config {
 		// 0 in zero-value Config means "use default"; explicit disable via -1 above.
 		c.SoftEpochSteps = envInt("REMEDY_REACT_EPOCH_STEPS", 64, 16, 2_000)
 	}
-	if c.MaxStaleEpochs <= 0 {
-		c.MaxStaleEpochs = envInt("REMEDY_REACT_MAX_STALE_EPOCHS", 8, 1, 50)
-	}
 	if c.KeepLastResults <= 0 {
 		c.KeepLastResults = 32
 	}
@@ -242,12 +240,12 @@ func (c Config) normalized() Config {
 		c.MaxParallelTools = envInt("REMEDY_MAX_PARALLEL_TOOLS", 32, 4, 64)
 	}
 	if c.MaxRepeatedBatch <= 0 {
-		c.MaxRepeatedBatch = 2
+		c.MaxRepeatedBatch = 3
 	}
 	if c.RepeatNudgeBudget < 0 {
 		c.RepeatNudgeBudget = 0
 	} else if c.RepeatNudgeBudget == 0 {
-		c.RepeatNudgeBudget = 1
+		c.RepeatNudgeBudget = 3
 	}
 	if c.ModelRetries < 0 {
 		c.ModelRetries = 0
@@ -381,11 +379,13 @@ const (
 	// SmallContextWindow is the largest window treated as a local / small model
 	// when auto-sizing per-result caps.
 	SmallContextWindow = 32_768
-	// FrontierMaxResultChars is the auto tool-result cap on a frontier window.
-	FrontierMaxResultChars = 30_000
+	// FrontierMaxResultChars is the auto tool-result cap on a frontier window
+	// (about 25,000 tokens, what current coding agents allow one result).
+	FrontierMaxResultChars = 100_000
 	// LocalMaxResultChars is the auto tool-result cap on a small local window.
 	LocalMaxResultChars = 8_000
-	// reservedOutputTokens is held back from the window for the reply.
+	// reservedOutputTokens is the most held back from the window for the
+	// reply; a small window holds back a quarter of itself (replyReserve).
 	reservedOutputTokens = 16_000
 	// promptBudgetFraction of the window may be spent on the transcript.
 	// Compaction starts near 80–90% of the model's real window after the
@@ -407,7 +407,7 @@ func transcriptBudgetAt(window int, share float64) int {
 	if share <= 0 || share > 1 {
 		share = promptBudgetFraction
 	}
-	budget := int(float64(window)*share) - reservedOutputTokens
+	budget := int(float64(window)*share) - replyReserve(window)
 	if floor := window / 4; budget < floor {
 		budget = floor
 	}
@@ -415,6 +415,20 @@ func transcriptBudgetAt(window int, share float64) int {
 		budget = 512
 	}
 	return budget
+}
+
+// replyReserve is the room kept for the reply. The fixed figure is larger than
+// a local model's whole window, which left such a model a quarter of its
+// window to work in.
+func replyReserve(window int) int {
+	return min(reservedOutputTokens, window/4)
+}
+
+// batchResultChars is the most text one batch of results may add: a quarter of
+// the transcript budget, so a round of many large results cannot fill the
+// window by itself. Never less than the small-window cap for one result.
+func batchResultChars(budget int) int {
+	return max(budget, LocalMaxResultChars/4) // budget tokens / 4, at about 4 chars a token
 }
 
 // defaultMaxResultChars chooses the tool-result cap from the model's window.
@@ -460,17 +474,15 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		out.Context.Window = DefaultContextWindow
 	}
 
-	var lastBatch string
+	var lastBatch, lastResults string
 	var failNotes failNoteState
 	repeated := 0
 	repeatNudges := 0
 	lengthContinues := 0
 	rearmCount := 0
 	toolCount := 0
-	toolsThisEpoch := 0
 	productiveThisEpoch := 0
 	epoch := 0
-	staleEpochs := 0
 	verifySeen := true
 	var outcomeLedger []string
 
@@ -483,14 +495,15 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			}
 		}
 		trace(StateObserve, iteration, "assemble transcript")
-		est := estimateTokens(transcript)
+		systemTokens := tokens.Count(system)
+		est := estimateTokens(transcript) + systemTokens
 		if est > trimAt {
 			before := len(transcript)
 			rewritten := false
 			elided := elideMiddleObservations(transcript)
 			// Either rewrite changes earlier turns, and a signed thinking block
 			// is valid only after the exact turns that produced it.
-			if elidedEst := estimateTokens(elided); elidedEst <= budget && elidedEst < est {
+			if elidedEst := estimateTokens(elided) + systemTokens; elidedEst <= budget && elidedEst < est {
 				transcript, rewritten = elided, true
 				trace(StateUpdate, iteration, fmt.Sprintf(
 					"elided middle observations %d messages (~%d→~%d tokens, budget %d)",
@@ -502,7 +515,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			}
 			if rewritten {
 				transcript = stripNative(transcript)
-				after := estimateTokens(transcript)
+				after := estimateTokens(transcript) + systemTokens
 				out.Context.Compactions++
 				if after < est {
 					out.Context.TokensSaved += est - after
@@ -611,7 +624,6 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 
 		lengthContinues = 0
 		toolCount += len(calls)
-		toolsThisEpoch += len(calls)
 		productive := batchHasProductive(calls)
 		if productive {
 			productiveThisEpoch += len(calls)
@@ -631,13 +643,13 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			}
 		}
 
-		// Novelty gate: an identical batch (sorted ABI name + canonical input)
-		// three times gets one nudge; a fourth ends the turn.
+		// Novelty gate. A repeat is the same batch (sorted ABI name + canonical
+		// input) that came back with the same results, counted after it ran
+		// (below). Asking again past the limit is refused with a nudge, and
+		// only after several nudges does the turn end.
 		batchKey := noveltyKey(calls)
-		if batchKey == lastBatch {
-			repeated++
-		} else {
-			lastBatch, repeated, repeatNudges = batchKey, 0, 0
+		if batchKey != lastBatch {
+			lastBatch, lastResults, repeated, repeatNudges = batchKey, "", 0, 0
 		}
 		if repeated >= config.MaxRepeatedBatch {
 			if repeatNudges < config.RepeatNudgeBudget {
@@ -647,10 +659,9 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				// nudge names them instead.
 				transcript = appendAssistant(transcript, thinking.String(), roundText, nil)
 				transcript = append(transcript, contextNote(
-					"[Nudge] You just asked for the same tools again with the same arguments ("+
-						batchPreview(calls)+") and nothing changed. That batch was not run. "+
-						"Change approach: read a different path, edit the failing file, run a verify "+
-						"command, or take a smaller next step. Do not restart the task."))
+					"[Nudge] The same tools with the same arguments ("+batchPreview(calls)+
+						") have returned the same results several times in a row, so this batch was not run again. "+
+						"Try something different, or say what is blocking you."))
 				trace(StateUpdate, iteration, "repeat-batch nudge")
 				continue
 			}
@@ -713,7 +724,20 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				e.AfterToolBatch(ctx, calls, results)
 			}()
 		}
-		modelResults := capResults(results, config.MaxResultChars)
+		// The same call with a new result is progress (a log that grew, a page
+		// that changed). Watching something is a tool's job, never a loop.
+		if resKey := resultsKey(results); watchOnly(calls) {
+			repeated = 0
+		} else if resKey == lastResults {
+			repeated++
+		} else {
+			lastResults, repeated, repeatNudges = resKey, 0, 0
+		}
+		perResult := config.MaxResultChars
+		if n := len(results); n > 1 {
+			perResult = min(perResult, max(batchResultChars(budget)/n, LocalMaxResultChars/2))
+		}
+		modelResults := capResults(results, perResult)
 
 		// One user message carrying every result in call order — never dropped.
 		blocks := make([]Block, 0, len(calls))
@@ -759,16 +783,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		// the transcript — the budget check at the top of the loop owns that.
 		if config.SoftEpochSteps > 0 && iteration%config.SoftEpochSteps == 0 {
 			epoch++
-			if toolsThisEpoch == 0 {
-				staleEpochs++
-				if staleEpochs >= config.MaxStaleEpochs {
-					out.Err = ErrNoProgress
-					out.Messages = cloneMessages(transcript)
-					trace(StateFailed, iteration, "stale epochs with no tool activity")
-					return out
-				}
-			} else if productiveThisEpoch > 0 {
-				staleEpochs = 0
+			if productiveThisEpoch > 0 {
 				// Productive mutate/verify extends the absolute runway so a real
 				// build never dies on a step counter. Explore-only does not.
 				runway := config.SoftEpochSteps * 4
@@ -781,10 +796,8 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 					config.MaxToolCalls = toolCount + toolRunway
 				}
 			} else {
-				staleEpochs = 0
 				trace(StateEpoch, iteration, "explore-only epoch (no runway extend)")
 			}
-			toolsThisEpoch = 0
 			productiveThisEpoch = 0
 			ledger := append([]string(nil), outcomeLedger...)
 			outcomeLedger = outcomeLedger[:0]
@@ -931,6 +944,11 @@ func clipLargestString(body map[string]json.RawMessage, total, maxChars int) ([]
 	}
 	body[key] = clipped
 	body["truncated"] = json.RawMessage("true")
+	// The tool's own paging pointed past text this cut took out of the middle.
+	if _, paged := body["next_offset"]; paged {
+		delete(body, "next_offset")
+		body["note"] = json.RawMessage(`"The middle of this text was cut to fit the reply, so next_offset no longer applies. Read again with a smaller limit to see all of it."`)
+	}
 	fitted, err := json.Marshal(body)
 	return fitted, err == nil
 }
@@ -1122,6 +1140,33 @@ func wait(ctx context.Context, d time.Duration) bool {
 
 // noveltyKey identifies a tool batch by sorted (ABI name, canonical input), so
 // re-ordered or re-keyed arguments do not read as a new attempt.
+// resultsKey identifies what a batch returned, in order.
+func resultsKey(results []ToolResult) string {
+	h := sha256.New()
+	for _, r := range results {
+		h.Write([]byte(r.Err))
+		h.Write([]byte{0})
+		h.Write(r.Output)
+		h.Write([]byte{1})
+	}
+	return string(h.Sum(nil))
+}
+
+// watchOnly reports a batch made only of tools whose purpose is to look again:
+// a background job's status or log, and the screen.
+func watchOnly(calls []ToolCall) bool {
+	for _, c := range calls {
+		switch n := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(c.Name)), "_", "."); n {
+		case "jobs", "screenshot", "computer.screenshot", "computer.snapshot", "computer.windows",
+			"computer.foreground", "computer.monitors", "computer.print.window",
+			"computer.uia.focused", "computer.uia.read.text":
+		default:
+			return false
+		}
+	}
+	return len(calls) > 0
+}
+
 func noveltyKey(calls []ToolCall) string {
 	parts := make([]string, len(calls))
 	for i, c := range calls {

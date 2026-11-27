@@ -158,9 +158,8 @@ func (a *Anthropic) ContextWindow() int {
 	if a.Gen.ContextWindow > 0 {
 		return a.Gen.ContextWindow
 	}
-	if n := envContextWindow(); n > 0 {
-		return n
-	}
+	// REMEDY_LOCAL_CTX sizes a local model's window and is not read here: it
+	// used to shrink a 1M cloud window to at most 256K.
 	// Every model before the 4.6 generation (Haiku, Sonnet and Opus 4.5 and
 	// older) has the 200K window; 4.6 and later have 1M.
 	if !supportsAdaptiveThinking(a.Model) {
@@ -334,7 +333,7 @@ func (a *Anthropic) pump(
 			return
 		case anthropic.StopReasonModelContextWindowExceeded:
 			emit(cognition.ModelEvent{
-				Status: "The transcript no longer fits the model's context window — compacting before the next turn.",
+				Status: "The conversation no longer fits the model's context window. Send continue: it is compacted at the start of the next turn.",
 				Done:   true,
 			})
 			return

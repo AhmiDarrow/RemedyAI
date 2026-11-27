@@ -93,10 +93,9 @@ REMEDY_REACT_MAX_TOTAL_STEPS=1000000
 REMEDY_REACT_MAX_TOOL_CALLS=10000000
 REMEDY_REACT_MAX_RESULT_CHARS=24000
 REMEDY_MAX_PARALLEL_TOOLS=32
-REMEDY_REACT_MAX_STALE_EPOCHS=8
 ```
 
-Soft epochs compact context and **continue** (lean outcome ledger, not orphan
+Soft epochs refresh the session brief and **continue** (lean outcome ledger, not orphan
 tool dumps). At each epoch the Memory Harness prune/offload/brief runs over RMDY
 so long builds stay efficient. Mid-build switches to a **coding tool pack**
 (fewer schemas per step). Local/RMB endpoints hard-fit into `n_ctx`. If the
@@ -115,7 +114,7 @@ When you say **work alone** / **handle this on your own**, continuity steers Rem
 3. `mission_update` as steps complete  
 4. `mission_verify` before claiming done (nudged when steps are done but verify has not passed)  
 5. Fix and re-verify on failure  
-6. Soft epochs compact context — the agent keeps going until verify passes / work is done  
+6. Soft epochs refresh the brief — the agent keeps going until the work is done  
 
 Orientation: if the focus folder has `AGENTS.md`, `memory/LATEST_HANDOFF.md`, etc., Remedy surfaces short pointers automatically.
 

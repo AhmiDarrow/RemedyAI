@@ -2345,3 +2345,21 @@ fn studio_rails_stay_beside_grove() {
         "and its list takes the new row"
     );
 }
+
+/// With Skills open, Memory replaces it, and the other way round.
+#[test]
+fn memory_and_skills_panes_switch_in_place() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(2);
+    let has_skills = |app: &TestApp| accessible_names(app).iter().any(|n| n.contains("Archive unused"));
+    assert!(app.press(Role::Button, "Skills"), "Skills in the top bar");
+    app.frames(3);
+    assert!(has_skills(&app), "the skills pane is open: {:?}", accessible_names(&app));
+    assert!(app.press(Role::Button, "Memory"), "Memory in the top bar");
+    app.frames(3);
+    assert!(!has_skills(&app), "Memory replaced the skills pane: {:?}", accessible_names(&app));
+    assert!(app.press(Role::Button, "Skills"), "Skills in the top bar");
+    app.frames(3);
+    assert!(has_skills(&app), "Skills replaced the memory pane: {:?}", accessible_names(&app));
+}
