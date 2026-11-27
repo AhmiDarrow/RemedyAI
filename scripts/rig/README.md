@@ -15,8 +15,10 @@ the serve process is started with `REMEDY_HOME` set to that sandbox,
 so sessions, memory, settings, and the instance lock all land in the throwaway
 tree. Scenarios that try to escape the project jail are *scored*, not obeyed.
 
-The one exception is `--use-host-key`, which reads a provider key from the live
-secure store so a cloud reference run can authenticate. It is read-only and the
+The one exception is `--use-host-key`, which takes a provider key from your
+environment (`REMEDY_RIG_API_KEY`, or the provider's own `<PROVIDER>_API_KEY`)
+so a cloud reference run can authenticate. The harness does not read the live
+install's secure store. It is read-only and the
 key is never printed, written into the sandbox config, or passed on a command
 line. It is supplied through the child process environment. Jail probes target
 a sibling directory inside the disposable tree, never the owner's Desktop.

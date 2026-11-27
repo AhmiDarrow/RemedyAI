@@ -228,5 +228,10 @@ def main(argv: list[str] | None = None) -> None:
     raise SystemExit(code)
 
 
+def mcp_main() -> None:
+    """``remedy-mcp``: the MCP stdio host, the same as ``remedy mcp serve``."""
+    main(["mcp", "serve", *sys.argv[1:]])
+
+
 if __name__ == "__main__":
     main()

@@ -17,13 +17,6 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "remedy"
 # (sys._MEIPASS layout), plus the authority module itself. Shrink, never grow.
 ALLOWED = {
     "core/runtime_identity.py",
-    "core/rg_binary.py",
-    "core/workspace.py",
-    "interfaces/uninstaller.py",
-    "interfaces/updater.py",
-    "runtime/bundle.py",
-    "voice/runtime.py",
-    "voice/service.py",
     "__init__.py",
 }
 

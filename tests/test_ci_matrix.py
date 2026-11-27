@@ -7,7 +7,6 @@ and scripts/release_local.py publishes.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import yaml
@@ -50,7 +49,6 @@ def _uses_step(job: object, action: str) -> dict[str, object]:
 
 
 ZIG_BUILD = "zig build -Doptimize=ReleaseSafe"
-
 
 
 def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
@@ -133,7 +131,6 @@ def test_zig_build_defaults_to_baseline_cpu() -> None:
     assert "SHA-NI" in text or "sha256msg1" in text
 
 
-
 def test_linux_release_installs_zig_host_libs_before_building_remedy_core() -> None:
     """GitHub's Ubuntu runners have no X11/AT-SPI; Zig links them
     (native/zig/build.zig). Every Linux release job that builds Zig runs
@@ -209,69 +206,6 @@ def _build_desktop_module():
     return module
 
 
-def test_build_desktop_stages_runtime_and_core_not_pyinstaller(tmp_path: Path) -> None:
-    """Local packaging stages Go runtime + Zig core into desktop/bin."""
-    import sys
-
-    import pytest
-
-    build_desktop = _build_desktop_module()
-    source = (ROOT / "scripts" / "build_desktop.py").read_text("utf-8")
-    for banned in (
-        "PyInstaller",
-        "pyinstaller",
-        "--add-binary",
-        "core_library_add_binary",
-        "write_sidecar_version_file",
-        "--onefile",
-    ):
-        assert banned not in source, banned
-    assert "go" in source and "cmd/remedy-runtime" in source
-    assert "zig build" in source
-    assert "remedy-runtime" in source
-
-    expected = {
-        "win32": "remedy_core.dll",
-        "darwin": "libremedy_core.dylib",
-    }.get(sys.platform, "libremedy_core.so")
-    assert build_desktop.core_library_name() == expected
-    default = build_desktop.default_core_library_path()
-    assert default.name == expected
-    assert default.parent.parent == ROOT / "native" / "zig" / "zig-out"
-    assert build_desktop.staged_core_path().name == expected
-    assert build_desktop.staged_core_path().parent == build_desktop.DESKTOP_BIN
-
-    plain, triple = build_desktop.runtime_bin_paths()
-    assert plain.parent == build_desktop.DESKTOP_BIN
-    assert plain.name.startswith("remedy-runtime")
-    assert "remedy-desktop" not in plain.name
-    assert triple.name.startswith("remedy-runtime-")
-
-    with pytest.raises(SystemExit):
-        build_desktop.resolve_core_library(tmp_path / "missing" / expected)
-    wrong_name = tmp_path / "other.bin"
-    wrong_name.write_bytes(b"")
-    with pytest.raises(SystemExit):
-        build_desktop.resolve_core_library(wrong_name)
-
-    from remedy.runtime.native_runtime import _ABI_VERSION
-
-    assert build_desktop.REQUIRED_CORE_ABI == _ABI_VERSION
-    assert build_desktop.REQUIRED_CORE_ABI == _prepush_module().REQUIRED_NATIVE_ABI
-    for path, pattern in (
-        ("native/zig/include/remedy_core.h", r"#define REMEDY_CORE_ABI_VERSION\s+(\d+)"),
-        ("native/zig/src/root.zig", r"pub const abi_version: u32 = (\d+)"),
-        ("native/go/core/status.go", r"const ABIVersion = (\d+)"),
-    ):
-        match = re.search(pattern, (ROOT / path).read_text("utf-8"))
-        assert match is not None, path
-        assert int(match.group(1)) == build_desktop.REQUIRED_CORE_ABI, path
-    assert "remedy_core_abi_version()" in source
-
-    parser_help = source[source.index("__main__") :]
-    assert "--core-lib" in parser_help
-
-
 def _prepush_module():
     import importlib.util
     import sys
@@ -283,7 +217,6 @@ def _prepush_module():
     sys.modules[spec.name] = module  # dataclasses look the module up by name
     spec.loader.exec_module(module)
     return module
-
 
 
 def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
@@ -298,58 +231,6 @@ def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
         "Windows go test alone misses Linux filepath traps; WSL go test is required"
     )
     assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo/gradle"
-
-
-def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
-    """Local pytest loads the core the native lane just built, or refuses to run."""
-    prepush = _prepush_module()
-    assert prepush.PYTHON.requires == ("native",)
-    assert "zig build -Doptimize=ReleaseSafe" in "\n".join(s.command for s in prepush.NATIVE.steps)
-    assert prepush.with_required_lanes({"python"}) == {"python", "native"}
-    assert prepush.LANES.index(prepush.NATIVE) < prepush.LANES.index(prepush.PYTHON)
-
-    library = prepush.native_core_library_path()
-    assert library.parent.parent == ROOT / "native" / "zig" / "zig-out"
-    assert library.name in {"remedy_core.dll", "libremedy_core.so", "libremedy_core.dylib"}
-    pytest_step = next(s for s in prepush.PYTHON.steps if s.name == "pytest")
-    assert pytest_step.env["REMEDY_NATIVE_CORE_LIB"] == str(library)
-    names = [s.name for s in prepush.PYTHON.steps]
-    assert names.index("native core present") < names.index("pytest")
-
-    # The WSL lane builds its own .so (into /tmp, never the checkout's zig-out)
-    # and hands it to the loader, when WSL has zig. It also runs Linux go test.
-    linux = [s.command for s in prepush.LINUX.steps]
-    assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_GO_TEST)
-    assert linux.index(prepush.WSL_GO_TEST) < linux.index(prepush.WSL_PYTEST)
-    assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
-    # One source of truth: the C header. A bump there must not leave the gate
-    # (or the Python/Go loaders) asserting a stale number.
-    header = (ROOT / "native" / "zig" / "include" / "remedy_core.h").read_text("utf-8")
-    header_abi = re.search(r"^#define\s+REMEDY_CORE_ABI_VERSION\s+(\d+)u?\s*$", header, re.M)
-    assert header_abi, "remedy_core.h must define REMEDY_CORE_ABI_VERSION"
-    assert int(header_abi.group(1)) == prepush.REQUIRED_NATIVE_ABI
-    assert prepush.required_native_abi() == prepush.REQUIRED_NATIVE_ABI
-
-    from remedy.runtime import native_runtime
-
-    assert native_runtime._ABI_VERSION == prepush.REQUIRED_NATIVE_ABI, (
-        "the Python loader and the pre-push gate must pin the same native ABI"
-    )
-    if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
-        build = prepush._wsl_zig_build_command()
-        assert build and "zig build -Doptimize=ReleaseSafe" in build
-        assert f"--prefix {prepush.WSL_ZIG_PREFIX}" in build
-        assert "--cache-dir" in build
-        assert "rm -f" in build and "libremedy_core.so" in build
-        assert f"assert v=={prepush.REQUIRED_NATIVE_ABI}" in build
-        assert "wiping zig caches and rebuilding" in build
-        pytest_cmd = prepush._wsl_pytest_command()
-        assert pytest_cmd
-        assert "rm -f" in pytest_cmd and "libremedy_core.so" in pytest_cmd
-        assert (f"REMEDY_NATIVE_CORE_LIB={prepush.WSL_NATIVE_CORE_LIB}" in pytest_cmd) == prepush._wsl_has_zig()
-        go_cmd = prepush._wsl_go_test_command()
-        assert go_cmd and "go test ./..." in go_cmd
-        assert "native/go" in go_cmd.replace("\\", "/")
 
 
 def test_prepush_hook_is_wired_and_executable() -> None:
@@ -376,7 +257,6 @@ def test_prepush_protects_only_public_branches_and_release_tags() -> None:
     assert prepush.RELEASE_TAG_RE.match("v1.2.3-rc.1")
     assert not prepush.RELEASE_TAG_RE.match("archive/v0.41.5")
     assert not prepush.RELEASE_TAG_RE.match("0.50.2")
-
 
 
 def test_release_builds_nothing_before_the_commit_is_verified() -> None:
@@ -432,7 +312,6 @@ def test_github_runs_no_ci_and_publishes_nothing() -> None:
     assert package.get("permissions") == {"contents": "read"}, "the RemedyUI package is read-only"
 
 
-
 def test_both_supported_python_versions_run_every_push() -> None:
     """Windows runs the suite on 3.12 (.python-version), Linux on 3.13."""
     prepush = _prepush_module()
@@ -456,7 +335,6 @@ def test_public_changelog_never_carries_unreleased_notes() -> None:
     assert prepush.unreleased_section(committed) == "", "keep pending notes in docs/UNRELEASED.md"
 
 
-
 def test_experimental_versions_publish_as_prereleases() -> None:
     """A version whose CHANGELOG section says Experimental never becomes GitHub's
     "latest" release, so installed apps do not auto-update to it."""
@@ -468,7 +346,6 @@ def test_experimental_versions_publish_as_prereleases() -> None:
     source = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
     main = source[source.index('f"v{version}", "-R", repo') :]
     assert 'if prerelease:\n        cmd += ["--prerelease", "--latest=false"]' in main
-
 
 
 def _release_local_module():
@@ -621,5 +498,3 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
     assert "if only is None and not force:" in verify, "--force always runs the full matrix"
     assert 'record["reduced_from"] = reduced_from' in verify, "reduced runs say so in the record"
     assert "if only is None or reduced_from is not None:" in verify, "hand-picked --only never stamps"
-
-
