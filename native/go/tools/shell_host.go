@@ -11,8 +11,9 @@ import (
 )
 
 // Host shell names the model is told about, and that platformShellArgvFor
-// actually launches. REMEDY_SHELL selects Git Bash or (rarely) cmd; the
-// default on Windows is pwsh, then Windows PowerShell.
+// actually launches. On Windows the default is Git Bash when it is installed,
+// then pwsh, then Windows PowerShell; the shell setting or REMEDY_SHELL names
+// one outright.
 const (
 	hostShellPwsh       = "pwsh"
 	hostShellPowerShell = "powershell"
@@ -28,6 +29,11 @@ const (
 	// land in one session directory instead of the project root.
 	RemedyScratchEnv = "REMEDY_SCRATCH"
 )
+
+// ShellPreference returns the owner's shell setting ("auto", "bash",
+// "powershell", "cmd" or ""). The runtime sets it; the REMEDY_SHELL
+// environment variable still comes first.
+var ShellPreference func() string
 
 // lookPathFunc and getenvFunc let tests inject PATH and env without
 // depending on the builder's operating system.
@@ -58,7 +64,7 @@ func describeHostShell() string {
 		return "Windows PowerShell -NoProfile -Command; the command is one argv element, not interpolated through cmd.exe"
 	case hostShellBash:
 		if runtime.GOOS == "windows" {
-			return "Git Bash -lc"
+			return "Git Bash (bash -c): POSIX commands, and paths written /c/Users/name or \"C:/Users/name\""
 		}
 		return "bash -lc"
 	case hostShellCmd:
@@ -75,7 +81,7 @@ func bashToolDescription() string {
 		"On Windows, do not use findstr, dir /s, or type to search or read files — use grep, glob, or read; those tools accept drive-letter paths, backslashes and ~. " +
 		"Set wsl:true to run the command in WSL bash; Windows paths (C:\\...) in the command and cwd are converted to /mnt/c/.... " +
 		"Temporary scripts belong in the session scratch directory (scratch_dir in the result, also $REMEDY_SCRATCH), not the project root. " +
-		"On Windows, set REMEDY_SHELL=bash to use Git Bash instead of PowerShell. " +
+		"On Windows, pass shell:\"powershell\" for a Windows-native command (cmdlets, the registry, a .ps1 script) or shell:\"bash\" for Git Bash; without it the shell named above runs. " +
 		"Cancellation and timeout kill the whole process tree."
 }
 
@@ -98,13 +104,29 @@ func resolveHostShellFor(goos string, getenv getenvFunc, look lookPathFunc) (hos
 		return resolvePosixShell(look)
 	}
 	pref := strings.ToLower(strings.TrimSpace(getenv(RemedyShellEnv)))
+	if pref == "" && ShellPreference != nil {
+		pref = strings.ToLower(strings.TrimSpace(ShellPreference()))
+	}
+	// Not a login shell: Git Bash sets its PATH either way, and a login
+	// shell costs about 400 ms a command against 80.
+	gitBash := func(path string) hostShellSpec {
+		return hostShellSpec{Kind: hostShellBash, Path: path, Flags: []string{"-c"}}
+	}
 	switch pref {
 	case "bash", "git-bash", "gitbash", "git_bash":
 		path, err := lookGitBash(look, getenv)
 		if err != nil {
-			return hostShellSpec{}, fmt.Errorf("%w: REMEDY_SHELL=%s but Git Bash was not found: %v", ErrInvalidInput, pref, err)
+			return hostShellSpec{}, fmt.Errorf("%w: the shell is set to %s but Git Bash was not found: %v", ErrInvalidInput, pref, err)
 		}
-		return hostShellSpec{Kind: hostShellBash, Path: path, Flags: []string{"-lc"}}, nil
+		return gitBash(path), nil
+	case "powershell", "pwsh":
+		// Fall through to the PowerShell chain below.
+	case "", "auto":
+		// The tool is called bash and models write bash for it. Run bash when
+		// the machine has one; PowerShell stays one argument away.
+		if path, err := lookGitBash(look, getenv); err == nil {
+			return gitBash(path), nil
+		}
 	case "cmd", "cmd.exe":
 		path, err := lookCmd(look, getenv)
 		if err != nil {
@@ -170,8 +192,13 @@ func lookCmd(look lookPathFunc, getenv getenvFunc) (string, error) {
 }
 
 func lookGitBash(look lookPathFunc, getenv getenvFunc) (string, error) {
+	// A bash on PATH counts unless it is Windows' own bash.exe, which starts
+	// WSL (a different machine as far as paths and tools go).
 	if path, err := firstFound(look, "bash.exe", "bash"); err == nil {
-		return path, nil
+		low := strings.ToLower(filepath.ToSlash(path))
+		if !strings.Contains(low, "/windows/system32/") && !strings.Contains(low, "/windowsapps/") {
+			return path, nil
+		}
 	}
 	var bases []string
 	for _, key := range []string{"ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"} {

@@ -15,6 +15,8 @@ All notable changes to Remedy are documented here.
 - The Files rail shows each entry's size and age, sorts by newest or largest as well as by name, and has a right-click menu (open, reveal, copy path, copy name). The reveal and copy buttons are icons that appear on the row under the pointer.
 
 ### Changed
+- On Windows the `bash` tool runs Git Bash when it is installed, and PowerShell when it is not. It ran PowerShell under the name bash, and commands written for bash kept tripping over PowerShell's rules. One command can still ask for the other shell (`shell: "powershell"` or `"bash"`), and `shell` in `config.toml` (`auto`, `bash`, `powershell`, `cmd`) sets the default. Windows' own `bash.exe`, which starts WSL, is never taken for Git Bash.
+- In the work pane a run of steps with one tool is marked failed only when every step failed. One failure in eight reads "Bash ×8 · 1 failed"; the whole group used to turn red.
 - A turn carries the conversation, not its last dozen messages: up to about 200 earlier messages (16,000 characters each, about 60,000 tokens in all), loaded in steps that keep the provider's prompt cache valid. When older messages are left out, Remedy is told how many.
 - The repeat check counts the same call returning the same result. Four identical runs are allowed, the next three are refused with a note, and only then does the turn stop. Watching a background job or the screen never counts.
 - `finish_checks` (`auto`, `all`, `off`) decides when a reply with no tool calls is sent back to work. `auto`, the default, keeps every check for small local models and, for larger ones, only the case where a check failed and the reply says the work is done.

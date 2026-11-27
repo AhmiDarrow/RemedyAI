@@ -59,6 +59,7 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 ### Shell and edits
 
 - **`bash`:** optional `timeout_ms` (up to 600000) and `cwd` for long Godot/cargo builds. On Windows the host is **cmd.exe**. Cancellation and timeout kill the process tree.
+- On Windows her shell is Git Bash when it is installed, PowerShell when it is not. `shell` in `config.toml` (`auto`, `bash`, `powershell`, `cmd`) sets it, and one command can ask for the other shell.
 - Prefer argv-style shell calls over quoted bash/PowerShell when the host dialect is unclear. Failed commands return a clear diagnostic (dialect / quoting / not-found / interactive) when one exists.
 - **`edit`:** exact `old_string` → `new_string`. Unique hunks keep CRLF and BOM. The same failed hunk is refused a second time this turn — `read` and copy a real snippet.
 - **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).

@@ -1765,6 +1765,23 @@ fn tools_block(
         .child(full)
 }
 
+/// The name a run of steps with one tool is shown under, and whether to paint
+/// it as failed. One failure in eight is "Bash ×8 · 1 failed" in the ordinary
+/// colour: painting the whole group red read as eight failures.
+fn group_label(group: &[WorkStep]) -> (String, bool) {
+    let name = short_tool(&group[0].name);
+    let failed = group.iter().filter(|s| s.status == StepStatus::Error).count();
+    if group.len() == 1 {
+        return (name, failed == 1);
+    }
+    let label = match failed {
+        0 => format!("{name} ×{}", group.len()),
+        n if n == group.len() => format!("{name} ×{} · all failed", group.len()),
+        n => format!("{name} ×{} · {n} failed", group.len()),
+    };
+    (label, failed == group.len())
+}
+
 /// Min: compact name chips and counts, no command lines.
 fn tools_min(ui: &Ui, steps: &[WorkStep]) -> El {
     let unit = ui.theme().spacing.unit;
@@ -1773,14 +1790,8 @@ fn tools_min(ui: &Ui, steps: &[WorkStep]) -> El {
         .gap(unit)
         .layout(|l| l.width = Length::Percent(1.0));
     for group in work::group_process_steps(steps) {
-        let name = short_tool(&group[0].name);
-        let failed = group.iter().any(|s| s.status == StepStatus::Error);
+        let (label, failed) = group_label(group);
         let running = group.iter().any(|s| s.status == StepStatus::Running);
-        let label = if group.len() > 1 {
-            format!("{name} ×{}", group.len())
-        } else {
-            name
-        };
         let fg = if failed {
             colors.danger
         } else if running {
@@ -1875,13 +1886,7 @@ fn process_group(
         .collect::<Vec<_>>()
         .join("+");
     let colors = ui.theme().colors.clone();
-    let name = short_tool(&step.name);
-    let title = if group.len() > 1 {
-        format!("{name} ×{}", group.len())
-    } else {
-        name
-    };
-    let failed = group.iter().any(|s| s.status == StepStatus::Error);
+    let (title, failed) = group_label(group);
     let running = group.iter().any(|s| s.status == StepStatus::Running);
     let mark = if failed {
         "✕"
@@ -2236,6 +2241,16 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_group_is_failed_only_when_every_step_failed() {
+        let ok = |id: &str| WorkStep::done(id, "bash");
+        let bad = |id: &str| WorkStep::failed(id, "bash", "exit 1");
+        assert_eq!(group_label(&[ok("1"), ok("2")]), ("Bash ×2".to_string(), false));
+        assert_eq!(group_label(&[ok("1"), bad("2"), ok("3")]), ("Bash ×3 · 1 failed".to_string(), false));
+        assert_eq!(group_label(&[bad("1"), bad("2")]), ("Bash ×2 · all failed".to_string(), true));
+        assert_eq!(group_label(&[bad("1")]), ("Bash".to_string(), true));
+    }
 
     #[test]
     fn default_width_stays_put_in_a_wide_well() {
