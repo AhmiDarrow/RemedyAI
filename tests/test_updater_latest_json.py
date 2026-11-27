@@ -65,7 +65,7 @@ def test_pyproject_license_is_apache_2() -> None:
 
 def test_release_workflow_publishes_unsigned_macos_desktop() -> None:
     text = _release_pipeline_text()
-    assert "build-tauri-macos" in text
+    assert "build-desktop-macos" in text
     assert "darwin-aarch64" in text
     assert "darwin-x86_64" in text
     assert "signingIdentity" in text or 'codesign --force --deep --sign -' in text

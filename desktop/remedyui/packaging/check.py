@@ -71,7 +71,7 @@ def main() -> int:
         r'Delete "$INSTDIR\remedy-voice.exe"',
         "hooks.nsh",
         "!ifndef HOOKS",
-        r"${__FILEDIR__}\..\..\..\src-tauri\windows\hooks.nsh",
+        r"${__FILEDIR__}\hooks.nsh",
         r"$LOCALAPPDATA\${PRODUCTNAME}",
         r"Uninstall\${PRODUCTNAME}",
         "!ifndef RUNTIMESRCPATH",
@@ -85,7 +85,7 @@ def main() -> int:
     need("/.remedy" not in nsi and "\\.remedy" not in nsi,
          "installer.nsi must not name the per-user data directory")
 
-    hooks = text(REPO / "desktop" / "src-tauri" / "windows" / "hooks.nsh")
+    hooks = text(REPO / "desktop" / "remedyui" / "packaging" / "windows" / "hooks.nsh")
     for snippet in (
         "/NOAUTOLAUNCH",
         "IfSilent",

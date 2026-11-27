@@ -111,7 +111,7 @@ pub fn persona(ui: &Ui, name: &str, user: bool, size: f32) -> El {
 fn wordmark_image() -> Option<(Image, f32)> {
     static LOGO: OnceLock<Option<(Image, f32)>> = OnceLock::new();
     LOGO.get_or_init(|| {
-        let decoded = decode(include_bytes!("../../public/logo.png"), None).ok()?;
+        let decoded = decode(include_bytes!("../assets/logo.png"), None).ok()?;
         let w = decoded.image.width.max(1);
         let h = decoded.image.height.max(1);
         let aspect = w as f32 / h as f32;

@@ -1286,7 +1286,7 @@ mod tests {
     #[test]
     fn nsis_keeps_silent_update_and_user_data() {
         let nsi = include_str!("../packaging/windows/installer.nsi");
-        let hooks = include_str!("../../src-tauri/windows/hooks.nsh");
+        let hooks = include_str!("../packaging/windows/hooks.nsh");
         assert!(nsi.contains("NSIS_HOOK_PREINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_POSTINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_PREUNINSTALL"));
@@ -1406,16 +1406,16 @@ mod tests {
             .arg(format!("/DIROHSRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DCORESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DWEBUISRCPATH={}", as_nsis(&webui)))
-            .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))
+            .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("remedyui/packaging/windows/hooks.nsh"))))
             .arg(format!(
                 "/DUNINSTALL_OPTIONS={}",
-                as_nsis(&desktop.join("src-tauri/windows/uninstall_options.ps1"))
+                as_nsis(&desktop.join("remedyui/packaging/windows/uninstall_options.ps1"))
             ))
             .arg(format!(
                 "/DUNINSTALL_WIPE={}",
-                as_nsis(&desktop.join("src-tauri/windows/uninstall_wipe.ps1"))
+                as_nsis(&desktop.join("remedyui/packaging/windows/uninstall_wipe.ps1"))
             ))
-            .arg(format!("/DINSTALLERICON={}", as_nsis(&desktop.join("src-tauri/icons/icon.ico"))))
+            .arg(format!("/DINSTALLERICON={}", as_nsis(&desktop.join("remedyui/assets/icons/icon.ico"))))
             .arg(&nsi)
             .status()
             .expect("spawn makensis");

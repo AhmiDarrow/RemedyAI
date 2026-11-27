@@ -112,10 +112,10 @@ $nsi = Join-Path $PSScriptRoot "windows\installer.nsi"
 function To-NsisPath([string]$Path) {
     return (Resolve-Path -LiteralPath $Path).Path
 }
-$hooks = To-NsisPath (Join-Path $desktop "src-tauri\windows\hooks.nsh")
-$options = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_options.ps1")
-$wipe = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_wipe.ps1")
-$icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
+$hooks = To-NsisPath (Join-Path $desktop "remedyui\packaging\windows\hooks.nsh")
+$options = To-NsisPath (Join-Path $desktop "remedyui\packaging\windows\uninstall_options.ps1")
+$wipe = To-NsisPath (Join-Path $desktop "remedyui\packaging\windows\uninstall_wipe.ps1")
+$icon = To-NsisPath (Join-Path $desktop "remedyui\assets\icons\icon.ico")
 $binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
 $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
 $voiceNsis = (Resolve-Path -LiteralPath $Voice).Path

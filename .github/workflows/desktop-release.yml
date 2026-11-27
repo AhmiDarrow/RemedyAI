@@ -176,7 +176,7 @@ jobs:
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
       # Packaged Desktop launches Go remedy-runtime (externalBin) and ships
-      # remedy_core.dll as a Tauri resource — no Python remedy-desktop.
+      # remedy_core.dll beside it.
       - name: Build native runtime
         shell: pwsh
         run: |
@@ -249,102 +249,88 @@ jobs:
             desktop/bin/remedy_core-aarch64-pc-windows-msvc.dll
           retention-days: 7
 
-  build-tauri:
-    needs: [verify, build-runtime]
+  # The RemedyUI desktop, packaged by desktop/remedyui/packaging. Each package
+  # job builds its own runtime and capability core for the package.
+  build-desktop:
+    needs: verify
     runs-on: windows-latest
-    outputs:
-      installer_name: ${{ steps.extract.outputs.installer_name }}
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Download runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: remedy-runtime-bins
-          path: desktop/bin/
-
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli
-
-      - name: Setup Python
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: '3.12'
-
-      - name: Stamp release version (match runtime job)
+      - name: Allow cargo to read RemedyUI
         shell: bash
-        run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
-
-      - name: Install frontend deps
-        run: npm ci
-        working-directory: desktop
-
-      - name: Build Tauri
-        run: npx tauri build --bundles nsis
-        working-directory: desktop
         env:
-          # Optional: set these GitHub secrets to produce signed updates.
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Install NSIS and minisign
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $nsis = "${env:ProgramFiles(x86)}\NSIS"
+          if (-not (Test-Path (Join-Path $nsis "makensis.exe"))) { throw "makensis.exe was not installed" }
+          Add-Content -Path $env:GITHUB_PATH -Value $nsis
+          Add-Content -Path $env:GITHUB_ENV -Value "NSISDIR=$nsis"
+          $zip = Join-Path $env:RUNNER_TEMP "minisign.zip"
+          Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
+          $dest = Join-Path $env:RUNNER_TEMP "minisign"
+          Expand-Archive $zip -DestinationPath $dest
+          # The archive holds one build per CPU; the runner is x64.
+          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1
+          if (-not $exe) { throw "minisign.exe was not in the 0.12 archive" }
+          Add-Content -Path $env:GITHUB_PATH -Value $exe.DirectoryName
+
+      - name: Package
+        shell: pwsh
+        working-directory: desktop/remedyui
+        env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./packaging/package-windows.ps1 -Jobs 4
 
-      - name: Find installer and signature
-        id: extract
+      - name: A signing key must give a signature
         shell: bash
         env:
           HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          INSTALLER=$(ls desktop/src-tauri/target/release/bundle/nsis/*.exe | head -1)
-          # softprops/action-gh-release rewrites spaces to dots in asset names.
-          # Rename before upload so GitHub asset name matches what we put in latest.json
-          # (older clients failed when URL and local signed name diverged).
-          BASE_DIR=$(dirname "${INSTALLER}")
-          SAFE_NAME=$(basename "${INSTALLER}" | tr ' ' '.')
-          if [[ "$(basename "${INSTALLER}")" != "${SAFE_NAME}" ]]; then
-            mv -f "${INSTALLER}" "${BASE_DIR}/${SAFE_NAME}"
-            if [[ -f "${INSTALLER}.sig" ]]; then
-              mv -f "${INSTALLER}.sig" "${BASE_DIR}/${SAFE_NAME}.sig"
-            fi
-            INSTALLER="${BASE_DIR}/${SAFE_NAME}"
-          fi
-          echo "installer_path=${INSTALLER}" >> $GITHUB_OUTPUT
-          echo "installer_name=$(basename "${INSTALLER}")" >> $GITHUB_OUTPUT
-          # Tauri emits a .sig next to the installer when createUpdaterArtifacts + signing key are set.
-          SIG="${INSTALLER}.sig"
-          ls -la desktop/src-tauri/target/release/bundle/nsis/ || true
-          if [[ -f "$SIG" ]]; then
-            echo "signature_path=${SIG}" >> $GITHUB_OUTPUT
-            echo "Found updater signature: ${SIG}"
-          else
-            echo "signature_path=" >> $GITHUB_OUTPUT
-            if [[ "${HAS_SIGNING_KEY}" == "true" ]]; then
-              echo "::error::TAURI_SIGNING_PRIVATE_KEY is set but no .sig was produced. Ensure bundle.createUpdaterArtifacts=true and the key/password are valid."
-              exit 1
-            fi
-            echo "::warning::No .sig produced (signing secrets not configured)."
+          ls -la desktop/remedyui/target/packaging/
+          if [[ "${HAS_SIGNING_KEY}" == "true" ]] && ! ls desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe.sig >/dev/null 2>&1; then
+            echo "::error::The signing key is set but the installer has no .sig."
+            exit 1
           fi
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: remedy-installer
-          path: ${{ steps.extract.outputs.installer_path }}
+          path: desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe
+          if-no-files-found: error
           retention-days: 7
 
       - name: Upload signature artifact
-        if: steps.extract.outputs.signature_path != ''
         uses: actions/upload-artifact@v4
         with:
           name: remedy-installer-sig
-          path: ${{ steps.extract.outputs.signature_path }}
+          path: desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe.sig
+          if-no-files-found: ignore
           retention-days: 7
 
   build-runtime-linux:
@@ -385,7 +371,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Packaged Desktop launches Go remedy-runtime (externalBin) and ships
-      # libremedy_core.so as a Tauri resource — no Python remedy-desktop.
+      # libremedy_core.so beside it.
       - name: Build Linux native runtime
         run: |
           mkdir -p desktop/bin
@@ -466,8 +452,8 @@ jobs:
   # macos-15, Intel on macos-15-intel. Zig 0.16 only auto-fills Apple
   # framework search paths for a native target, so do not pass
   # -Dtarget=x86_64-macos from arm64 (v0.68.0 / v0.68.1 failed there).
-  # The unsigned (ad-hoc) Desktop Tauri bundles are built in
-  # build-tauri-macos, also on the matching native runner. There are no
+  # The unsigned (ad-hoc) desktop bundles are built in
+  # build-desktop-macos, also on the matching native runner. There are no
   # Apple Developer credentials in this project, so the app is not notarized.
   build-runtime-macos:
     needs: verify
@@ -536,215 +522,144 @@ jobs:
             desktop/bin/libremedy_core-${{ matrix.triple }}.dylib
           retention-days: 7
 
-  build-tauri-linux:
-    needs: [verify, build-runtime-linux]
+  build-desktop-linux:
+    needs: verify
     runs-on: ubuntu-22.04
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install WebKitGTK / Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libfuse2
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Download Linux runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: remedy-runtime-linux
-          path: desktop/bin/
-
-      - name: Mark runtime executable
-        run: chmod +x desktop/bin/remedy-runtime desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
-
-      - name: Setup Python
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: '3.12'
-
-      - name: Stamp release version (match runtime job)
+      - name: Allow cargo to read RemedyUI
         shell: bash
-        run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
 
-      - name: Install frontend deps
-        run: npm ci
-        working-directory: desktop
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Tauri (deb + AppImage)
-        run: npx tauri build --bundles deb,appimage
-        working-directory: desktop
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Install packaging tools and minisign
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libwayland-dev libxkbcommon-dev \
+            dpkg-dev file curl ca-certificates libfuse2 python3 \
+            libx11-dev libxtst-dev libatspi2.0-dev libdbus-1-dev libglib2.0-dev
+          curl -fsSL -o /tmp/minisign.tar.gz \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          sudo tar -C /usr/local/bin -xzf /tmp/minisign.tar.gz --strip-components=2 minisign-linux/x86_64/minisign
+          sudo chmod 0755 /usr/local/bin/minisign
+
+      - name: Package
+        working-directory: desktop/remedyui
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Collect Linux packages
-        id: linux
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEB_DIR=desktop/src-tauri/target/release/bundle/deb
-          APP_DIR=desktop/src-tauri/target/release/bundle/appimage
-          ls -la "$DEB_DIR" "$APP_DIR" || true
-          DEB=$(ls "$DEB_DIR"/*.deb | head -1)
-          APP=$(ls "$APP_DIR"/*.AppImage | head -1)
-          mkdir -p dist-linux
-          DEB_SAFE=$(basename "${DEB}" | tr ' ' '.')
-          APP_SAFE=$(basename "${APP}" | tr ' ' '.')
-          cp -f "${DEB}" "dist-linux/${DEB_SAFE}"
-          cp -f "${APP}" "dist-linux/${APP_SAFE}"
-          SIG=$(ls "$APP_DIR"/*.AppImage.sig 2>/dev/null | head -1 || true)
-          if [[ -n "${SIG}" ]]; then
-            SIG_SAFE=$(basename "${SIG}" | tr ' ' '.')
-            cp -f "${SIG}" "dist-linux/${SIG_SAFE}"
-          fi
-          echo "deb_name=${DEB_SAFE}" >> "$GITHUB_OUTPUT"
-          echo "appimage_name=${APP_SAFE}" >> "$GITHUB_OUTPUT"
+        run: bash ./packaging/package-linux.sh --jobs 4
 
       - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
           name: remedy-linux
-          path: dist-linux/*
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage.sig
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb.sig
+          if-no-files-found: error
           retention-days: 7
 
-  # Unsigned / ad-hoc codesign (`codesign --force --deep --sign -`). No Apple Developer credentials or
-  # notarization. Users first-open with right-click Open or
-  # `xattr -dr com.apple.quarantine`. Updater signatures are minisign, same
-  # as Windows and Linux, over the .app.tar.gz for each arch.
-  build-tauri-macos:
-    needs: [verify, build-runtime-macos]
+  # Unsigned / ad-hoc codesign (`codesign --force --deep --sign -`, in
+  # package-macos.sh). No Apple Developer credentials or notarization.
+  # Users first-open with right-click Open or `xattr -dr com.apple.quarantine`.
+  # Updater signatures are minisign, same as Windows and Linux, over the
+  # .app.tar.gz for each arch.
+  build-desktop-macos:
+    needs: verify
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_BUILD_JOBS: "4"
     strategy:
       fail-fast: false
       matrix:
         include:
-          - rust_target: aarch64-apple-darwin
-            go_triple: aarch64-apple-darwin
-            asset_arch: aarch64
-            smoke: true
+          - asset_arch: aarch64
             runner: macos-15
-          - rust_target: x86_64-apple-darwin
-            go_triple: x86_64-apple-darwin
-            asset_arch: x64
-            smoke: false
+          - asset_arch: x64
             runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      - name: Setup Python
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: '3.12'
-
-      - name: Download macOS runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: remedy-runtime-macos-${{ matrix.go_triple }}
-          path: desktop/bin/
-
-      - name: Stage arch-specific sidecar, dylib, and worker deps
+      - name: Allow cargo to read RemedyUI
+        shell: bash
         env:
-          GO_TRIPLE: ${{ matrix.go_triple }}
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          mkdir -p desktop/bin
-          chmod +x "desktop/bin/remedy-runtime-${GO_TRIPLE}"
-          cp -f "desktop/bin/remedy-runtime-${GO_TRIPLE}" desktop/bin/remedy-runtime
-          chmod +x desktop/bin/remedy-runtime
-          chmod +x "desktop/bin/remedy-iroh-${GO_TRIPLE}"
-          cp -f "desktop/bin/libremedy_core-${GO_TRIPLE}.dylib" desktop/bin/libremedy_core.dylib
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
 
-      - name: Stamp release version (match runtime job)
-        shell: bash
-        run: python3 scripts/sync_version.py "${{ needs.verify.outputs.version }}"
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install frontend deps
-        run: npm ci
-        working-directory: desktop
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
 
-      - name: Build Tauri (dmg + app, ad-hoc codesign)
-        run: npx tauri build --bundles dmg,app --target ${{ matrix.rust_target }}
-        working-directory: desktop
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      # Homebrew builds for the runner's own CPU; the release archive is Apple silicon only.
+      - name: Install minisign
+        run: |
+          set -euo pipefail
+          brew install minisign
+          command -v minisign
+
+      - name: Package
+        working-directory: desktop/remedyui
         env:
           MACOSX_DEPLOYMENT_TARGET: '12.0'
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash ./packaging/package-macos.sh --jobs 4
 
-      - name: Finalize bundle, updater tarball, and optional smoke
+      - name: The update payload must be signed
         env:
           ASSET_ARCH: ${{ matrix.asset_arch }}
-          RUST_TARGET: ${{ matrix.rust_target }}
-          SMOKE: ${{ matrix.smoke }}
-          VER: ${{ needs.verify.outputs.version }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          BUNDLE_ROOT="desktop/src-tauri/target/${RUST_TARGET}/release/bundle"
-          if [[ ! -d "${BUNDLE_ROOT}/macos" ]]; then
-            BUNDLE_ROOT="desktop/src-tauri/target/release/bundle"
-          fi
-          APP=$(find "${BUNDLE_ROOT}/macos" -maxdepth 2 -name '*.app' -type d | head -1)
-          if [[ -z "${APP}" || ! -d "${APP}" ]]; then
-            echo "::error::tauri build did not produce a .app under ${BUNDLE_ROOT}/macos"
-            find desktop/src-tauri/target -name '*.app' -o -name '*.dmg' | head -50
-            exit 1
-          fi
-          mkdir -p dist-macos
-          TAR="dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.app.tar.gz"
-          bash scripts/macos_finalize_desktop_bundle.sh \
-            --app "${APP}" \
-            --dylib desktop/bin/libremedy_core.dylib \
-            --tar "${TAR}"
-          DMG=$(find "${BUNDLE_ROOT}/dmg" -name '*.dmg' 2>/dev/null | head -1 || true)
-          if [[ -z "${DMG}" || ! -f "${DMG}" ]]; then
-            echo "::error::tauri build did not produce a .dmg"
-            exit 1
-          fi
-          cp -f "${DMG}" "dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.dmg"
+          ls -la desktop/remedyui/target/packaging/
+          TAR=$(ls desktop/remedyui/target/packaging/Remedy.Desktop_*_${ASSET_ARCH}.app.tar.gz | head -1)
           if [[ ! -f "${TAR}.sig" ]]; then
-            echo "::error::No updater signature for ${TAR}. Signed auto-update is required (createUpdaterArtifacts + TAURI_SIGNING_PRIVATE_KEY)."
-            ls -la dist-macos "${BUNDLE_ROOT}/macos" || true
+            echo "::error::No updater signature for ${TAR}. Signed auto-update is required."
             exit 1
           fi
-          if [[ "${SMOKE}" == "true" ]]; then
-            bash scripts/smoke_macos_desktop.sh "dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.dmg"
-          fi
-          ls -la dist-macos
 
       - name: Upload macOS packages
         uses: actions/upload-artifact@v4
         with:
           name: remedy-macos-${{ matrix.asset_arch }}
-          path: dist-macos/*
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.dmg
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz.sig
+          if-no-files-found: error
           retention-days: 7

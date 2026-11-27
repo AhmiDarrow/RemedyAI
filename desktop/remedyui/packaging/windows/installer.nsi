@@ -25,7 +25,7 @@
 ; and keeps the per-user data directory.
 ;
 ; Hooks live in the Tauri tree and must be included, not rewritten:
-;   desktop/src-tauri/windows/hooks.nsh
+;   desktop/remedyui/packaging/windows/hooks.nsh
 
 Unicode true
 ManifestDPIAware true
@@ -75,16 +75,16 @@ CRCCheck on
 ; paths for !include or File. package-windows.ps1 passes absolute backslash
 ; /D defines so the compile does not depend on the working directory.
 !ifndef HOOKS
-  !define HOOKS "${__FILEDIR__}\..\..\..\src-tauri\windows\hooks.nsh"
+  !define HOOKS "${__FILEDIR__}\hooks.nsh"
 !endif
 !ifndef UNINSTALL_OPTIONS
-  !define UNINSTALL_OPTIONS "${__FILEDIR__}\..\..\..\src-tauri\windows\uninstall_options.ps1"
+  !define UNINSTALL_OPTIONS "${__FILEDIR__}\uninstall_options.ps1"
 !endif
 !ifndef UNINSTALL_WIPE
-  !define UNINSTALL_WIPE "${__FILEDIR__}\..\..\..\src-tauri\windows\uninstall_wipe.ps1"
+  !define UNINSTALL_WIPE "${__FILEDIR__}\uninstall_wipe.ps1"
 !endif
 !ifndef INSTALLERICON
-  !define INSTALLERICON "${__FILEDIR__}\..\..\..\src-tauri\icons\icon.ico"
+  !define INSTALLERICON "${__FILEDIR__}\..\..\assets\icons\icon.ico"
 !endif
 
 !include "MUI2.nsh"
