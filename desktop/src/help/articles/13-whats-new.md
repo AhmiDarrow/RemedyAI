@@ -43,6 +43,23 @@ Earlier notes follow on this page, newest first.
   name you gave her, and this install. Its shape, eyes and color are hers, and
   it gains detail the longer you work together. Ask her for a new face and she
   will draw one; ask for the old one back and she restores it.
+- **One Remedy everywhere.** Grove, Studio and a paired phone show the same
+  face and the same mood, decided by what she is actually doing.
+- **Connectors.** Add an MCP server (GitHub, an issue tracker, a database and
+  many more) in Settings → Connections → Connectors, by URL or as a command on
+  this computer, and Remedy can use its tools. In Auto a connector's tools wait
+  for you unless you mark that connector to run without asking. See
+  [Connectors](10-cli-and-api.md#connectors).
+- **A conversation that flows.** A message you send while she works lands in
+  order, between what she said before it and what she says after. An interrupt
+  no longer loses the message. Every message shows when it was said.
+- **Faster chat.** Long conversations stay quick: the newest 40 messages are
+  built, and earlier ones load with "Show earlier messages".
+- **Git Bash on Windows.** The `bash` tool runs Git Bash when it is installed,
+  so commands written for bash work.
+- **She keeps the thread.** A turn now carries up to about 200 earlier
+  messages, and the repeat check only stops a call that keeps returning the
+  same result.
 - **Grove.** Grove is one conversation: Talk, Plan and Build are gone from it.
   When a request needs Studio, Remedy starts it there in the background and
   leaves a card in Grove that shows how it is going and opens it.
