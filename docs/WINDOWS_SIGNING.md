@@ -9,7 +9,7 @@ install. That is expected for unsigned builds — not a bug in the app.
 
 | Artifact | Method | Purpose |
 |----------|--------|---------|
-| Updater payload (`latest.json` + `.sig`) | **minisign** via Tauri (`TAURI_SIGNING_*` secrets) | In-app auto-update trust |
+| Updater payload (`latest.json` + `.sig`) | **minisign** (`TAURI_SIGNING_*` secrets, read by `desktop/remedyui/packaging/sign-minisign.*`) | In-app auto-update trust |
 | Installer EXE | *not yet Authenticode-signed* | OS trust / SmartScreen |
 
 minisign protects **updates between already-installed copies**. It does **not**
@@ -22,15 +22,15 @@ replace Authenticode for the **first** download from the browser.
 | Releases only from | `https://github.com/AhmiDarrow/RemedyAI/releases` |
 | Update metadata | `…/releases/latest/download/latest.json` (URL must match publisher) |
 | Installer asset name | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces; never `Remedy_Desktop_`) |
-| Example URL | `…/releases/download/v0.14.4/Remedy.Desktop_0.14.4_x64-setup.exe` |
-| minisign public key (Tauri base64) | In `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+| Example URL | `…/releases/download/v2.1.1/Remedy.Desktop_2.1.1_x64-setup.exe` |
+| minisign public key (base64) | `MINISIGN_PUBKEY_B64` in `desktop/remedyui/src/update.rs` (the same key as `desktop/src-tauri/tauri.conf.json`) |
 
 If auto-update reports `Download URL does not match signed latest.json asset`,
 compare the **got** URL filename to the table above. Rename the GitHub Release
 asset to the canonical `Remedy.Desktop_*` form (or re-run Desktop Release CI)
 so it matches `latest.json` — that is the intended ops fix.
 
-Current embedded pubkey (base64 minisign; also in `tauri.conf.json`):
+Current embedded pubkey (base64 minisign):
 
 ```
 dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK
@@ -38,14 +38,14 @@ dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldU
 
 Install **only** from this repository’s GitHub Releases. In-app updates refuse assets that fail signature or publisher URL checks.
 
-The RemedyUI 1.0 shell uses this same public key and the same `latest.json` shape. Its Windows package is still an NSIS `Remedy.Desktop_{ver}_x64-setup.exe` that accepts `/S /NCRC /UPDATE /NOAUTOLAUNCH` (and `/D=` last). An upgrade runs the previous uninstaller with `/S /UPDATE` and waits for it (`_?=`), so the per-user data directory stays. Build steps are in `desktop/remedyui/packaging/README.md`. That path does not generate a new minisign key and does not publish the release.
+The RemedyUI desktop uses this same public key and the same `latest.json` shape. Its Windows package is still an NSIS `Remedy.Desktop_{ver}_x64-setup.exe` that accepts `/S /NCRC /UPDATE /NOAUTOLAUNCH` (and `/D=` last). An upgrade runs the previous uninstaller with `/S /UPDATE` and waits for it (`_?=`), so the per-user data directory stays. Build steps are in `desktop/remedyui/packaging/README.md`. That path does not generate a new minisign key and does not publish the release.
 
 ## What removes the SmartScreen warning
 
 1. Buy an **Authenticode code-signing certificate**
    - **OV** (Organization Validation) — standard; SmartScreen reputation builds over time with download volume.
    - **EV** (Extended Validation) — higher cost; often immediate reputation with SmartScreen.
-2. Sign the **NSIS setup EXE** (and ideally the main app EXE) after `tauri build`.
+2. Sign the **NSIS setup EXE** (and ideally the main app EXE) after `packaging/package-windows.ps1` builds it.
 3. Optionally timestamp the signature so it remains valid after the cert expires.
 4. Publish the signed installer on GitHub Releases (CI).
 
@@ -57,7 +57,7 @@ The RemedyUI 1.0 shell uses this same public key and the same `latest.json` shap
 ### CI sketch (after you have a cert)
 
 ```yaml
-# After tauri build produces the NSIS setup.exe:
+# After package-windows.ps1 produces the NSIS setup.exe:
 - name: Authenticode sign installer
   run: |
     # Example with signtool + cert from secrets / Azure Key Vault / SSL.com eSigner
@@ -67,7 +67,7 @@ The RemedyUI 1.0 shell uses this same public key and the same `latest.json` shap
 
 Store the PFX/password or cloud-HSM credentials only as **GitHub Actions secrets**
 (never commit them). Wire the step into `.github/workflows/desktop-release.yml`
-after the Tauri build job and before `softprops/action-gh-release`.
+after the Package step of the Windows job, before the installer is uploaded.
 
 ### Local one-off sign
 
@@ -75,7 +75,7 @@ after the Tauri build job and before `softprops/action-gh-release`.
 # With Windows SDK signtool and a .pfx:
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   /f "$env:USERPROFILE\certs\remedy-codesign.pfx" /p $env:CERT_PASSWORD `
-  .\desktop\src-tauri\target\release\bundle\nsis\*.exe
+  .\desktop\remedyui\target\packaging\Remedy.Desktop_*_x64-setup.exe
 ```
 
 ## Reputation without EV
@@ -89,26 +89,26 @@ Even with OV:
 
 ## Defender ML false positives (not SmartScreen)
 
-Separate from SmartScreen, **Windows Defender** ML may label unsigned
-Tauri / freshly written installer EXEs as:
+Separate from SmartScreen, **Windows Defender** ML may label unsigned,
+freshly written installer EXEs as:
 
 - `Trojan:Win32/Wacatac.B!ml`
 - `Trojan:Win32/Bearfoos.A!ml`
 - `Behavior:Win32/Execution.A!ml` when the UI binary is generic `app.exe`
 - (legacy) `Behavior:Win32/Persistence.A!ml` when apps write `HKCU\…\Run`
 
-Packaged Desktop no longer ships a PyInstaller `remedy-desktop` sidecar —
-launch is Go `remedy-runtime` (`externalBin`) plus Zig `remedy_core`.
+Packaged Desktop ships no PyInstaller sidecar: it starts the Go
+`remedy-runtime` plus the Zig `remedy_core` installed beside it.
 
 **Code mitigations already in-tree** (see also `docs/DESKTOP.md`):
 
 | Area | Mitigation |
 |------|------------|
 | Persistence | Startup folder `.lnk` only; never write Run; delete legacy Run names |
-| UI EXE name | `mainBinaryName` = `Remedy Desktop` (not generic `app.exe`) |
+| UI EXE name | `Remedy Desktop.exe` (not generic `app.exe`) |
 | Scrub implementation | Rust `winreg` + NSIS `DeleteRegValue` (no hidden PowerShell Bypass on launch) |
-| Local API binary | Go `remedy-runtime` via Tauri `externalBin` (no PyInstaller onefile) |
-| Bundle metadata | `publisher`, `copyright`, descriptions in `tauri.conf.json`; Cargo authors/repo |
+| Local API binary | Go `remedy-runtime` installed beside the app (no PyInstaller onefile) |
+| Bundle metadata | Windows resources from `desktop/remedyui/build.rs` (winresource); Cargo authors/repo |
 
 **What still requires a certificate:** Authenticode on the NSIS installer and
 main EXE remains the strongest fix for SmartScreen and many ML FPs. Until then,
@@ -119,7 +119,7 @@ submit each release binary to Microsoft WDSI if users report quarantines
 
 | File | Role |
 |------|------|
-| `desktop/src-tauri/tauri.conf.json` | `plugins.updater.pubkey` (minisign public key) |
+| `desktop/remedyui/src/update.rs` | `MINISIGN_PUBKEY_B64` (minisign public key) |
 | `.github/workflows/desktop-release.yml` | Build + minisign update artifacts |
 | `scripts/set_tauri_signing_secrets.py` | Upload minisign private key to GH secrets |
 | `docs/DESKTOP.md` | Auto-update overview |

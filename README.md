@@ -26,7 +26,9 @@
 
 ---
 
-Remedy lives on **this computer**. The Desktop app runs on **Windows x64**, **Linux** (including WSLg), and **macOS** (Apple Silicon and Intel). The CLI also runs on **Windows ARM64** and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
+Remedy lives on **this computer**. The Desktop app runs on **Windows x64**, **Linux** (including WSLg), and **macOS** (Apple Silicon and Intel). The CLI also runs on **Windows ARM64** and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. The **phone app** (Android) pairs with your PC and shows the same Remedy. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
+
+**New in 2.1.1:** a face of her own, the same on every screen; **connectors** (MCP servers such as GitHub, added in Settings → Connections → Connectors); a conversation that flows in order with timestamps; faster long chats; and no Python anywhere. [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md).
 
 | | |
 |--|--|
@@ -63,12 +65,14 @@ Sample data throughout.
 ```mermaid
 flowchart LR
   desk[Desktop app<br/>Grove · Alongside · Studio] --> rt
+  phone[Phone app<br/>paired over Grove Connect] --> rt
   cli["CLI: remedy serve"] --> rt
   rt[remedy-runtime, Go<br/>127.0.0.1:7400] --> helpers[Native helpers<br/>voice · vision · local search]
   rt --> zig[Zig capability core<br/>checks before it acts]
   rt --> home[(~/.remedy<br/>memory · state · events)]
   rt --> gw[Gateway<br/>Telegram · Discord · Slack · more]
   rt --> claim[ClaimIDX host<br/>known fixes for agents]
+  rt --> mcp[Connectors<br/>MCP servers you add]
   rt --> model{{Your model<br/>cloud key or local RMB}}
 ```
 
@@ -87,7 +91,9 @@ These are the platforms with published assets on the [latest GitHub release](htt
 | macOS arm64 (Apple Silicon) | Yes — unsigned `Remedy.Desktop_*_aarch64.dmg` | Yes |
 | macOS x86_64 (Intel) | Yes — unsigned `Remedy.Desktop_*_x64.dmg` | Yes |
 
-There is no Windows ARM64 Desktop installer in this release. macOS builds are ad-hoc signed and not notarized.
+| Android (arm64) | Phone app — `Remedy.Connect_arm64-v8a.apk`, paired with a PC running Remedy | — |
+
+There is no Windows ARM64 Desktop installer in this release. macOS builds are ad-hoc signed and not notarized. The phone app is sideloaded (no store listing); Settings → Connect → Get the phone app shows a QR code for it.
 
 ### Install
 

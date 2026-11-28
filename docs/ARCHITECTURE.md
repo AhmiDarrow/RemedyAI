@@ -9,16 +9,16 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 |-------|------|------|
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
 | Python tooling | `scripts/`, `tests/` | Developer tooling only (gates, release script), run with `uv run`. Remedy ships no Python |
-| Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
-| Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
-| SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
-| Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
-| Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
+| Desktop app | `desktop/remedyui/` | Rust on RemedyUI (Grove / Alongside / Studio). `cargo test` runs it on an in-memory host and checks golden images |
+| Web UI | `desktop/src/` | The older React app, served by the runtime at `http://127.0.0.1:7400/` |
+| Phone app | `connect/app/`, `connect/core/` | Rust on RemedyUI, reusing the desktop's Grove; `connect/core` is the pairing and frame protocol |
+| Python tooling tests | `tests/` | Tests for the developer scripts only |
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
 | Gateway | `native/go/gateway/` + `native/go/httpapi` (SSOT `messenger_catalog.json`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema via embedded JSON; Python `messenger_settings` loads that fixture fail-closed for TestClient/scrub/CLI only (no catalog twin; no adapter/router/session_bridge; no `/api/webhooks*` registrar) |
 | Native runtime | `native/` | Go runtime and Zig capability core. Speech runs in the Rust `remedy-voice` helper; the image model and the local search engine are downloaded, verified and supervised by the runtime |
 | Claimidx host | `native/go/httpapi/claimidx_host.go` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 | Peer interop | `native/go/httpapi/interop.go` | A2A v1.0 and MCP talk-to-Remedy. Peers, not muscles. Inbound off / localhost / token by default. See `docs/AGENT_INTEROP.md`. |
+| Connectors | `native/go/httpapi/mcp_client.go`, `mcp_api.go` | MCP client (official Go SDK): servers the owner adds give tools named `mcp.<server>.<tool>`. Owner-only routes `/api/mcp/servers`; tokens in the secret store |
 
 Entry: `remedy serve` → `remedy-runtime` · verification: `scripts/prepush.py` runs
 the authoritative multi-stack matrix on the owner's machine (there is no CI on
@@ -37,7 +37,7 @@ The Go tool ABI (1) and the Zig C ABI (`REMEDY_CORE_ABI_VERSION`) are probed at 
 a tool that needs the Zig core fails closed when the core is missing or of another ABI.
 
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
-packaged Desktop launch that binary (fail closed if missing). The Python `remedy` command is a launcher for that binary.
+packaged Desktop launch that binary (fail closed if missing). The `remedy` command line is the same Go binary.
 There is no Python worker. Startup
 performs one bounded readiness probe only when native mode is requested; the
 liveness route remains probe-free. Native durability requires contiguous event
@@ -50,15 +50,16 @@ and Linux. `/api/ping` reports cached selector and fallback evidence but never
 launches a probe, preserving the liveness route's low-latency contract. Native
 CI and release builds cover both operating systems.
 
-## Surfaces (one SPA)
+## Surfaces
 
-| Surface | How UI loads | Voice | Settings |
-|---------|----------------|-------|----------|
-| Tauri desktop (`tauri:dev`) | Vite `localhost:5173` | Grove + Studio | Grove overlay; Studio rail |
-| WebUI `http://127.0.0.1:7400/` | Static `desktop/dist` (mount at **serve start**) | Same SPA — rebuild + **restart serve** | Same |
-| CLI | no SPA | **No voice** (owner preference 2026-08-20) | n/a |
+| Surface | What it is | Voice |
+|---------|------------|-------|
+| Desktop app | `desktop/remedyui`, native window | Grove + Studio |
+| Phone app | `connect/app`, paired over Grove Connect | Talk |
+| WebUI `http://127.0.0.1:7400/` | Static `desktop/dist` (mounted at **serve start**) | Same as the older desktop |
+| CLI | `remedy` (the Go runtime) | **No voice** (owner preference 2026-08-20) |
 
-Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` in `App.tsx`). Logo-menu Settings must **not** switch Grove → Studio.
+All of them read the same runtime state: one conversation, one face, one mood.
 
 ## Core control plane
 
@@ -74,13 +75,13 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 
 ## Language
 
-`native/go/httpapi/i18n.go` — `ui_language` (`auto` or a BCP-47 id). Chrome catalogs overlay English. Reply-language is a system-prompt line (`language_system_line`); it does not strip tools or checkpoints. `GET /api/i18n`. Desktop: `desktop/src/i18n/`. Help manuals stay English until translated.
+`native/go/httpapi/i18n.go` — `ui_language` (`auto` or a BCP-47 id). Chrome catalogs overlay English. Reply-language is a system-prompt line (`language_system_line`); it does not strip tools or checkpoints. `GET /api/i18n`. Web UI: `desktop/src/i18n/`. Help manuals stay English until translated.
 
 ## Voice stack
 
 - API: `native/go/httpapi/voice.go` → `voice_native.go` → the `remedy-voice` helper (`native/voice`)
 - First-run setup session lives in `setup_session.json` and `GET`/`PUT /api/setup`; house rules are `native/go/mind/houserules` plus `/house_rules` and `settings.patch` confirmation. Docs: [SETUP.md](SETUP.md), [HOUSE_RULES.md](HOUSE_RULES.md).
-- UI: `desktop/src/components/settings/VoiceSection.tsx` (HQ toggle), Grove `GroveVoiceControls` (speak/quiet only), Studio composer/status bar
+- UI: Settings → Voice, the Speak button in Grove and the Studio status bar (`desktop/remedyui`)
 - Identity: `~/.remedy/voice/identity.json`.
 - Telephony loopback: `SipDirectBackend` (`sip_direct`) — UDP/in-process echo on 127.0.0.1, `simulated=True`
 
@@ -112,4 +113,4 @@ Money, send, and delete still need the owner. Details: `docs/AGENT_INTEROP.md`.
 
 ## Versioning
 
-`pyproject.toml`, `desktop/package.json`, and `desktop/src-tauri/Cargo.toml` share one version. Tag + push only when the owner asks; local HEAD may be ahead of origin without a matching tag.
+One version for everything: `scripts/sync_version.py` writes it to `pyproject.toml`, `desktop/package.json`, the Cargo manifests (`desktop/remedyui`, `connect/app`, `desktop/src-tauri`) and `native/go/httpapi/api.go`. Tag + push only when the owner asks; local HEAD may be ahead of origin without a matching tag.
