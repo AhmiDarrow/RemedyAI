@@ -141,6 +141,7 @@ pub fn app(app: &App) {
             }
         });
         chrome.attach(&a, window, ui);
+        runtime::contain_unowned_binding_panics(ui);
         depth::set_host(a.clone(), window.clone());
         // One stored face for every surface of this window.
         presence::keep_one_face();
