@@ -1386,50 +1386,13 @@ fn handle_el(ui: &Ui, prefs: Signal<ChatSplit>, line: remedy_ui::core::Color) ->
 }
 
 fn actions_feed(ui: &Ui, studio: Studio) -> El {
-    let unit = ui.theme().spacing.unit;
+    // The feed's state lives as long as the feed. The list that shows it is built inside the
+    // branch, fresh each time the branch mounts: an element built once out here and mounted
+    // again after its branch was torn down still ran its list over state that teardown had
+    // dropped, and the app closed (changing the text size rebuilds this pane).
     let turns: Signal<Vec<ActionTurn>> = Signal::new(Vec::new());
-    let out = turns.clone();
-    let st = studio.clone();
-    let col = w::column(ui)
-        .gap(unit * 3.0)
-        .padding(Insets {
-            top: 12.0,
-            end: tokens::GUTTER,
-            bottom: tokens::GUTTER,
-            start: tokens::GUTTER,
-        })
-        .layout(|l| l.width = Length::Percent(1.0));
-    let _ = col.clone().bind(move || {
-        let next = collect_turns(&st);
-        // `turns` is local to this feed. Deleting the active session remounts
-        // the well and can flush this bind once after the signal is disposed.
-        match out.try_get() {
-            Ok(cur) if cur != next => {
-                let _ = out.try_set(next);
-            }
-            _ => {}
-        }
-    });
     let expanded: Signal<Vec<String>> = Signal::new(Vec::new());
     let process_open: Signal<Vec<String>> = Signal::new(Vec::new());
-    let u = ui.clone();
-    let st_rows = studio.clone();
-    let col_state = expanded;
-    let proc_state = process_open;
-    let col = w::for_each(
-        &col,
-        turns,
-        |t| t.id.clone(),
-        move |t| {
-            action_turn(
-                &u,
-                st_rows.clone(),
-                t.clone(),
-                col_state.clone(),
-                proc_state.clone(),
-            )
-        },
-    );
     let empty_st = studio.clone();
     let u_empty = ui.clone();
     let u_feed = ui.clone();
@@ -1439,14 +1402,36 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
         move || actions_standby(&u_empty),
     )
     .fallback(move || {
-        w::scroll(&u_feed)
+        let ui = &u_feed;
+        let unit = ui.theme().spacing.unit;
+        let col = w::column(ui)
+            .gap(unit * 3.0)
+            .padding(Insets {
+                top: 12.0,
+                end: tokens::GUTTER,
+                bottom: tokens::GUTTER,
+                start: tokens::GUTTER,
+            })
+            .layout(|l| l.width = Length::Percent(1.0));
+        let st = studio.clone();
+        let _ = col.clone().bind(move || {
+            let next = collect_turns(&st);
+            if turns.try_with(|cur| *cur != next).unwrap_or(false) {
+                let _ = turns.try_set(next);
+            }
+        });
+        let (u, st_rows) = (ui.clone(), studio.clone());
+        let col = w::for_each(&col, turns, |t| t.id.clone(), move |t| {
+            action_turn(&u, st_rows.clone(), t.clone(), expanded, process_open)
+        });
+        w::scroll(ui)
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.grow = 1.0;
                 l.basis = Length::Px(0.0);
                 l.min_height = Length::Px(0.0);
             })
-            .child(col.clone())
+            .child(col)
     })
     .el()
 }
