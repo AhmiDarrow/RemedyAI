@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ type mcpEchoIn struct {
 
 // startTestConnector runs a real MCP server in memory with two tools and
 // returns a manager connected to it under the name "demo".
-func startTestConnector(t *testing.T) (*mcpManager, *tools.Registry, *int) {
+func startTestConnector(t *testing.T) (*mcpManager, *tools.Registry, *atomic.Int32) {
 	t.Helper()
 	server := mcp.NewServer(&mcp.Implementation{Name: "demo-server", Version: "1"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "echo", Description: "Say the text back."},
@@ -38,15 +39,16 @@ func startTestConnector(t *testing.T) (*mcpManager, *tools.Registry, *int) {
 	t.Cleanup(func() { _ = session.Close() })
 
 	registry := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
-	resyncs := 0
-	m := newMCPManager(t.TempDir(), registry, func() { resyncs++ })
+	// The manager calls this from its connect goroutine.
+	resyncs := &atomic.Int32{}
+	m := newMCPManager(t.TempDir(), registry, func() { resyncs.Add(1) })
 	m.dial = func(mcpServerConfig, string) (mcp.Transport, error) { return clientSide, nil }
 	t.Cleanup(m.Stop)
 	m.set(mcpServerConfig{Name: "demo", Command: "unused", Enabled: true, Approval: "ask"})
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if st := m.status(); len(st) == 1 && st[0]["state"] == "connected" {
-			return m, registry, &resyncs
+			return m, registry, resyncs
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -61,7 +63,7 @@ func TestConnectorToolsAreListedCalledAndRemoved(t *testing.T) {
 	if len(listed) != 2 || listed[0].ID != "mcp.demo.break_it" || listed[1].ID != "mcp.demo.echo" {
 		t.Fatalf("tools: %+v", listed)
 	}
-	if *resyncs == 0 {
+	if resyncs.Load() == 0 {
 		t.Fatal("the model's tool list was not refreshed after the tools arrived")
 	}
 	desc, err := registry.Latest("mcp.demo.echo")
