@@ -606,6 +606,8 @@ impl Chrome {
             launch_at_login: self.launch_at_login.get(),
             // Owned by the terminal's shell picker; keep what it saved.
             terminal_shell: prefs::DesktopPrefs::load().terminal_shell,
+            // Owned by Settings, Appearance, Drawing.
+            renderer: prefs::DesktopPrefs::load().renderer,
         };
         prefs.save();
     }

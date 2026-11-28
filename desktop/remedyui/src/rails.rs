@@ -646,7 +646,7 @@ fn icon_rail(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> El {
         .el("slide_rail")
         .column()
         .align(Align::Center)
-        .gap(4.0)
+        .gap(crate::tokens::space() * 1.0)
         .padding(Insets {
             top: 8.0,
             end: 0.0,
@@ -810,7 +810,7 @@ fn swap_header(
     let title = msg(ui, slide.label_id());
     let mut header = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .padding(Insets {
             top: 0.0,
             end: 8.0,
@@ -1024,7 +1024,7 @@ fn resize_handle(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
                 .style(move || {
                     StylePatch::new()
                         .background(if hot.get() { grip } else { line })
-                        .radius(1.0)
+                        .radius(crate::tokens::corner(crate::tokens::Corner::Small))
                 }),
         )
         .cursor(remedy_ui::input::Cursor::ColResize)
@@ -1127,7 +1127,7 @@ fn popout_layer(ui: &Ui, chrome: &WorkspaceChrome, pop: Popout, size: Size) -> E
                 s = s.radius(0.0);
             } else {
                 s = s
-                    .radius(12.0)
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Large))
                     .border(line)
                     .border_width(1.0)
                     .shadow(Shadow::new(0.0, 24.0, 64.0, Color::rgba8(0, 0, 0, 115)));
@@ -1187,7 +1187,7 @@ fn popout_chrome(
     let close = chrome.clone();
     w::row(ui)
         .align(Align::Center)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .padding(Insets {
             top: 0.0,
             end: 12.0,
@@ -1232,7 +1232,7 @@ fn popout_chrome(
             ui,
             &close_label,
             &close_title,
-            Color::WHITE,
+            crate::tokens::on_color(colors.danger),
             colors.danger,
             None,
             move || {
@@ -1250,7 +1250,7 @@ fn text_btn(
     border: Option<Color>,
     on_press: impl Fn() + 'static,
 ) -> El {
-    let mut style = StylePatch::new().background(bg).foreground(fg).radius(6.0);
+    let mut style = StylePatch::new().background(bg).foreground(fg).radius(crate::tokens::corner(crate::tokens::Corner::Medium));
     if let Some(c) = border {
         style = style.border(c).border_width(1.0);
     }
@@ -1397,7 +1397,7 @@ fn quiet_style(colors: &remedy_ui::style::ColorRoles) -> StylePatch {
         .foreground(crate::tokens::icon_fg(colors))
         .border(Color::TRANSPARENT)
         .border_width(1.0)
-        .radius(8.0)
+        .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
 }
 
 fn mark_style(colors: &remedy_ui::style::ColorRoles, current: bool, open: bool) -> StylePatch {
@@ -1407,14 +1407,14 @@ fn mark_style(colors: &remedy_ui::style::ColorRoles, current: bool, open: bool) 
             .foreground(colors.accent)
             .border(colors.accent.with_alpha(0.45))
             .border_width(1.0)
-            .radius(8.0)
+            .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
     } else if current {
         StylePatch::new()
             .background(colors.accent.with_alpha(0.14))
             .foreground(colors.accent)
             .border(colors.accent.with_alpha(0.30))
             .border_width(1.0)
-            .radius(8.0)
+            .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
     } else {
         quiet_style(colors)
     }

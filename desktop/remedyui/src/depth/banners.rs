@@ -1,8 +1,8 @@
-//! Approval, plan, life, library, cost, todos, and the live trace.
+//! Approval, plan, life, library, cost and todos.
 
 use super::logic::{self, show_life_banner};
 use super::{
-    approve_plan, background_title, dismiss_library, focused_steps, install_library,
+    approve_plan, background_title, dismiss_library, install_library,
     refresh_banners, request_plan_changes, resolve_approval, send_life, show_plan,
     visible_approval,
 };
@@ -10,8 +10,6 @@ use super::Approval;
 use crate::messages;
 use crate::tokens;
 use crate::studio::{Studio, WorkMode};
-use crate::work::WorkStep;
-use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::style::StylePatch;
@@ -38,7 +36,7 @@ pub fn lead(ui: &Ui, studio: Studio) -> El {
         .child(plan(ui, studio, false))
 }
 
-/// Remote-busy, background job, todos, progress, and the live trace.
+/// Remote-busy and background job.
 pub fn status(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     w::column(ui)
@@ -54,10 +52,8 @@ pub fn status(ui: &Ui, studio: Studio) -> El {
             start: unit * 4.0,
         })
         .child(remote(ui, studio.clone()))
-        .child(background(ui, studio.clone()))
-        // BUILD todos render in the Actions pane, not under the chat bubbles.
-        .child(progress(ui, studio.clone()))
-        .child(trace(ui, studio))
+        .child(background(ui, studio))
+        // BUILD todos and her steps render in the Actions pane, not under the chat bubbles.
 }
 
 /// Run and session token counts, just above the composer.
@@ -118,7 +114,7 @@ fn approval_card(ui: &Ui, studio: Studio) -> El {
     };
     card_shell(ui, &messages().text(ui, "approval-title"), &summary).child(
         w::row(ui)
-            .gap(8.0)
+            .gap(crate::tokens::space() * 2.0)
             .child(scope_button(
                 ui,
                 studio.clone(),
@@ -214,8 +210,8 @@ pub(crate) fn plan_empty(ui: &Ui, studio: Studio) -> El {
         move || {
             let colors = u.theme().colors.clone();
             w::column(&u)
-                .gap(8.0)
-                .padding(Insets::all(12.0))
+                .gap(crate::tokens::space() * 2.0)
+                .padding(Insets::all(crate::tokens::space() * 3.0))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
@@ -271,7 +267,7 @@ fn plan_card(ui: &Ui, studio: Studio) -> El {
     let u = ui.clone();
     let mut card_el = card_shell(ui, &title, &body).child(w::text(ui, &count).variant("muted"));
     if !card.steps.is_empty() {
-        let mut steps = w::column(ui).gap(4.0).layout(|l| {
+        let mut steps = w::column(ui).gap(crate::tokens::space() * 1.0).layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         });
@@ -290,7 +286,7 @@ fn plan_card(ui: &Ui, studio: Studio) -> El {
     }
     card_el.child(
         w::row(ui)
-            .gap(8.0)
+            .gap(crate::tokens::space() * 2.0)
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.wrap = true;
@@ -354,7 +350,7 @@ fn life_card(ui: &Ui, studio: Studio) -> El {
     let no = word_button(ui, studio.clone(), "life-no", "no");
     let explain = word_button(ui, studio, "life-explain", "explain");
     card_shell(ui, &messages().text(ui, "life-title"), &line)
-        .child(w::row(ui).gap(8.0).child(yes).child(no).child(explain))
+        .child(w::row(ui).gap(crate::tokens::space() * 2.0).child(yes).child(no).child(explain))
 }
 
 fn word_button(ui: &Ui, studio: Studio, label: &'static str, word: &'static str) -> El {
@@ -386,7 +382,7 @@ fn library_card(ui: &Ui, studio: Studio) -> El {
     let u = ui.clone();
     card_shell(ui, &messages().text(ui, "library-title"), &body).child(
         w::row(ui)
-            .gap(8.0)
+            .gap(crate::tokens::space() * 2.0)
             .child(
                 w::button(
                     ui,
@@ -454,7 +450,7 @@ fn todos(ui: &Ui, studio: Studio) -> El {
         move || {
             let title = messages().text(&u, "todos-title");
             let col = w::column(&u)
-                .gap(2.0)
+                .gap(crate::tokens::space() * 0.5)
                 .child(w::text(&u, title).variant("strong"));
             let rows = studio.depth.todos.clone();
             w::for_each(
@@ -485,105 +481,6 @@ fn mark(status: &str) -> &'static str {
         "done" | "completed" | "complete" => "✓",
         "doing" | "in_progress" | "active" => "→",
         _ => "·",
-    }
-}
-
-fn progress(ui: &Ui, studio: Studio) -> El {
-    let st = studio.clone();
-    let u = ui.clone();
-    show(
-        ui,
-        move || st.depth.progress.get().is_some(),
-        move || {
-            let label = messages().text(&u, "progress-label");
-            w::progress(&u, label, studio.depth.progress.clone())
-        },
-    )
-    .el()
-}
-
-fn trace(ui: &Ui, studio: Studio) -> El {
-    let st = studio.clone();
-    let u = ui.clone();
-    let steps = studio.live_steps.clone();
-    show(
-        ui,
-        move || !focused_steps(&st).is_empty(),
-        move || {
-            let open = studio.depth.trace_open.clone();
-            let toggle = open.clone();
-            let label = u.clone();
-            let colors = u.theme().colors.clone();
-            let line = colors.line.unwrap_or(colors.muted);
-            let radius = u.theme().radii.medium;
-            let open_style = open.clone();
-            let button = w::button(
-                &u,
-                move || messages().text(&label, "trace"),
-                move || toggle.update(|v| *v = !*v),
-            )
-            .variant("quiet")
-            .style({
-                let colors = colors.clone();
-                move || {
-                    let on = open_style.get();
-                    StylePatch::new()
-                        .weight(500.0)
-                        .foreground(if on { colors.text } else { colors.muted })
-                        .border(line)
-                        .border_width(1.0)
-                        .radius(radius)
-                }
-            })
-            .semantics({
-                let u = u.clone();
-                let open = open.clone();
-                move || {
-                    Semantics::new(Role::Button)
-                        .label(messages().text(&u, "trace"))
-                        .expanded(open.get())
-                        .action(Action::Click)
-                }
-            });
-            let lines_ui = u.clone();
-            let rows = steps.clone();
-            w::column(&u)
-                .gap(6.0)
-                .child(w::row(&u).child(button.layout(|l| {
-                    l.shrink = 0.0;
-                    l.grow = 0.0;
-                })))
-                .child(
-                    show(
-                        &u,
-                        move || open.get(),
-                        move || {
-                            let host = w::column(&lines_ui).gap(2.0);
-                            w::for_each(&host, rows.clone(), step_key, {
-                                let u = lines_ui.clone();
-                                move |step| {
-                                    let line = logic::trace_lines(std::slice::from_ref(step))
-                                        .into_iter()
-                                        .next()
-                                        .map(|(name, state)| format!("{name}  {state}"))
-                                        .unwrap_or_default();
-                                    w::text(&u, line).variant("muted")
-                                }
-                            })
-                        },
-                    )
-                    .el(),
-                )
-        },
-    )
-    .el()
-}
-
-fn step_key(step: &WorkStep) -> String {
-    if step.id.is_empty() {
-        step.name.clone()
-    } else {
-        format!("{}|{}", step.id, step.name)
     }
 }
 

@@ -17,7 +17,7 @@ use crate::grove;
 use crate::presence::{self, Mood};
 use crate::studio::Studio;
 use crate::titlebar;
-use crate::tokens::{self, typo, BODY, HERO, META, SECTION, SPACE, TITLE};
+use crate::tokens::{self, typo, BODY, HERO, META, SECTION, space, TITLE};
 
 fn pin_face() {
     presence::set_skin_override(Some("square"));
@@ -63,9 +63,9 @@ fn setup_frame(ui: &Ui, body: El) -> El {
 fn setup_card(ui: &Ui, children: Vec<El>) -> El {
     let c = colors(ui);
     let mut col = w::column(ui)
-        .gap(SPACE * 3.0)
+        .gap(space() * 3.0)
         .align(Align::Start)
-        .padding(Insets::all(SPACE * 5.0))
+        .padding(Insets::all(space() * 5.0))
         .layout(|l| {
             l.width = Length::Px(480.0);
             l.max_width = Length::Px(480.0);
@@ -97,10 +97,10 @@ fn field(ui: &Ui, value: &str) -> El {
     w::row(ui)
         .align(Align::Center)
         .padding(Insets {
-            start: SPACE * 2.0,
-            end: SPACE * 2.0,
-            top: SPACE * 1.5,
-            bottom: SPACE * 1.5,
+            start: space() * 2.0,
+            end: space() * 2.0,
+            top: space() * 1.5,
+            bottom: space() * 1.5,
         })
         .layout(|l| l.width = Length::Percent(1.0))
         .style(crate::tokens::well_surface(&c))
@@ -109,7 +109,7 @@ fn field(ui: &Ui, value: &str) -> El {
 
 fn actions_end(ui: &Ui, children: Vec<El>) -> El {
     let mut row = w::row(ui)
-        .gap(SPACE * 2.0)
+        .gap(space() * 2.0)
         .align(Align::Center)
         .justify(Justify::End)
         .layout(|l| l.width = Length::Percent(1.0));
@@ -124,9 +124,9 @@ fn option_row(ui: &Ui, title: &str, body: &str, recommended: bool, selected: boo
     let border = if selected { c.accent } else { line(&c) };
     let bg = if selected { c.panel } else { c.card };
     let col = w::column(ui)
-        .gap(SPACE)
+        .gap(space())
         .align(Align::Start)
-        .padding(Insets::all(SPACE * 2.5))
+        .padding(Insets::all(space() * 2.5))
         .layout(|l| l.width = Length::Percent(1.0))
         .style(
             StylePatch::new()
@@ -137,7 +137,7 @@ fn option_row(ui: &Ui, title: &str, body: &str, recommended: bool, selected: boo
         )
         .child({
             let mut row = w::row(ui)
-                .gap(SPACE * 2.0)
+                .gap(space() * 2.0)
                 .align(Align::Center)
                 .layout(|l| l.width = Length::Percent(1.0))
                 .child(label(ui, title, TITLE, c.text).layout(|l| l.grow = 1.0));
@@ -145,10 +145,10 @@ fn option_row(ui: &Ui, title: &str, body: &str, recommended: bool, selected: boo
                 row = row.child(
                     w::row(ui)
                         .padding(Insets {
-                            start: SPACE,
-                            end: SPACE,
-                            top: SPACE * 0.4,
-                            bottom: SPACE * 0.4,
+                            start: space(),
+                            end: space(),
+                            top: space() * 0.4,
+                            bottom: space() * 0.4,
                         })
                         .style(
                             StylePatch::new()
@@ -186,7 +186,7 @@ pub fn hello(ui: &Ui) -> El {
                     c.muted,
                 ),
                 w::column(ui)
-                    .gap(SPACE * 1.5)
+                    .gap(space() * 1.5)
                     .align(Align::Start)
                     .layout(|l| l.width = Length::Percent(1.0))
                     .child(primary(ui, "Use the recommended setup"))
@@ -341,13 +341,13 @@ pub fn update_quiet(ui: &Ui) -> El {
 fn ready_notice(ui: &Ui) -> El {
     let c = colors(ui);
     w::row(ui)
-        .gap(SPACE * 2.0)
+        .gap(space() * 2.0)
         .align(Align::Center)
         .padding(Insets {
-            start: SPACE * 3.0,
-            end: SPACE * 3.0,
-            top: SPACE * 1.5,
-            bottom: SPACE * 1.5,
+            start: space() * 3.0,
+            end: space() * 3.0,
+            top: space() * 1.5,
+            bottom: space() * 1.5,
         })
         .layout(|l| l.width = Length::Percent(1.0))
         .style(
@@ -396,10 +396,10 @@ fn nav_item(ui: &Ui, text: &str, on: bool) -> El {
     let fg = if on { c.text } else { c.muted };
     w::row(ui)
         .padding(Insets {
-            start: SPACE * 2.0,
-            end: SPACE * 2.0,
-            top: SPACE * 1.2,
-            bottom: SPACE * 1.2,
+            start: space() * 2.0,
+            end: space() * 2.0,
+            top: space() * 1.2,
+            bottom: space() * 1.2,
         })
         .layout(|l| l.width = Length::Percent(1.0))
         .style(if on {
@@ -421,10 +421,10 @@ fn channel_row(ui: &Ui, text: &str, on: bool) -> El {
         .align(Align::Center)
         .justify(Justify::Center)
         .padding(Insets {
-            start: SPACE * 2.5,
-            end: SPACE * 2.5,
-            top: SPACE * 1.2,
-            bottom: SPACE * 1.2,
+            start: space() * 2.5,
+            end: space() * 2.5,
+            top: space() * 1.2,
+            bottom: space() * 1.2,
         })
         .layout(|l| l.grow = 1.0)
         .style(
@@ -440,8 +440,8 @@ fn channel_row(ui: &Ui, text: &str, on: bool) -> El {
 fn advanced_body(ui: &Ui) -> El {
     let c = colors(ui);
     let nav = w::column(ui)
-        .gap(SPACE)
-        .padding(Insets::all(SPACE * 3.0))
+        .gap(space())
+        .padding(Insets::all(space() * 3.0))
         .layout(|l| {
             l.width = Length::Px(220.0);
             l.height = Length::Percent(1.0);
@@ -458,8 +458,8 @@ fn advanced_body(ui: &Ui) -> El {
         .child(nav_item(ui, "Advanced", true));
 
     let notes = w::column(ui)
-        .gap(SPACE)
-        .padding(Insets::all(SPACE * 2.5))
+        .gap(space())
+        .padding(Insets::all(space() * 2.5))
         .layout(|l| l.width = Length::Percent(1.0))
         .style(
             StylePatch::new()
@@ -477,13 +477,13 @@ fn advanced_body(ui: &Ui) -> El {
         ));
 
     let channel = w::column(ui)
-        .gap(SPACE * 1.5)
+        .gap(space() * 1.5)
         .align(Align::Start)
         .layout(|l| l.width = Length::Percent(1.0))
         .child(group_label(ui, "Channel"))
         .child(
             w::row(ui)
-                .gap(SPACE * 1.5)
+                .gap(space() * 1.5)
                 .layout(|l| l.width = Length::Percent(1.0))
                 .child(channel_row(ui, "Stable", true))
                 .child(channel_row(ui, "Preview", false)),
@@ -496,7 +496,7 @@ fn advanced_body(ui: &Ui) -> El {
         ));
 
     let rollback = w::column(ui)
-        .gap(SPACE * 1.5)
+        .gap(space() * 1.5)
         .align(Align::Start)
         .layout(|l| l.width = Length::Percent(1.0))
         .child(group_label(ui, "Rollback"))
@@ -509,9 +509,9 @@ fn advanced_body(ui: &Ui) -> El {
         .child(quiet(ui, "Restore 1.0.0"));
 
     let pane = w::column(ui)
-        .gap(SPACE * 4.0)
+        .gap(space() * 4.0)
         .align(Align::Start)
-        .padding(Insets::all(SPACE * 5.0))
+        .padding(Insets::all(space() * 5.0))
         .layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
@@ -527,7 +527,7 @@ fn advanced_body(ui: &Ui) -> El {
         ))
         .child({
             let mut col = w::column(ui)
-                .gap(SPACE)
+                .gap(space())
                 .align(Align::Start)
                 .layout(|l| l.width = Length::Percent(1.0))
                 .child(group_label(ui, "Notes"));

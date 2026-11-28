@@ -429,7 +429,7 @@ fn header(ui: &Ui, dash: UsageDashboard, on_close: impl Fn() + 'static) -> El {
         .child(
             w::text(ui, move || subtitle(&dash.provider.get(), &dash.model.get()))
                 .variant("muted")
-                .style(StylePatch::new().text_size(11.0)),
+                .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::CAPTION))),
         );
     w::row(ui)
         .align(Align::Center)
@@ -682,7 +682,7 @@ fn stat_card(ui: &Ui, label: &str, value: &str) -> El {
         .child(
             w::text(ui, label)
                 .variant("muted")
-                .style(StylePatch::new().text_size(10.0)),
+                .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO))),
         )
         .child(w::text(ui, value).style(StylePatch::new().weight(600.0)))
 }
@@ -728,7 +728,7 @@ fn chart(ui: &Ui, bars: &[api::DayBar]) -> El {
     let radius = ui.theme().radii.small;
     let mut row = w::row(ui)
         .align(Align::End)
-        .gap(4.0)
+        .gap(crate::tokens::space() * 1.0)
         .padding(Insets {
             top: 0.0,
             end: 4.0,
@@ -751,7 +751,7 @@ fn bar_column(ui: &Ui, bar: &api::DayBar, accent: Color, radius: f32) -> El {
     let mut column = w::column(ui)
         .align(Align::Center)
         .justify(Justify::End)
-        .gap(4.0)
+        .gap(crate::tokens::space() * 1.0)
         .layout(|l| {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
@@ -782,7 +782,7 @@ fn bar_column(ui: &Ui, bar: &api::DayBar, accent: Color, radius: f32) -> El {
             .truncate()
             .style(
                 StylePatch::new()
-                    .text_size(10.0)
+                    .text_size(crate::tokens::size(crate::tokens::MICRO))
                     .text_align(TextAlign::Center),
             )
             .layout(|l| l.width = Length::Percent(1.0)),
@@ -1039,7 +1039,7 @@ fn hero_card(
         .child(
             w::text(ui, label)
                 .variant("muted")
-                .style(StylePatch::new().text_size(10.0)),
+                .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO))),
         )
         .child(
             w::text(ui, value).style(
@@ -1051,7 +1051,7 @@ fn hero_card(
         .child(
             w::text(ui, detail)
                 .variant("muted")
-                .style(StylePatch::new().text_size(10.0)),
+                .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO))),
         )
 }
 
@@ -1157,7 +1157,7 @@ fn pattern_block(ui: &Ui, dash: UsageDashboard) -> El {
                 .style(
                     StylePatch::new()
                         .mono(true)
-                        .text_size(10.0),
+                        .text_size(crate::tokens::size(crate::tokens::MICRO)),
                 )
             }
         })
@@ -1211,7 +1211,7 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
                     .unwrap_or_default()
             })
             .variant("muted")
-            .style(StylePatch::new().text_size(10.0)),
+            .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO))),
         )
         .child(
             show(ui, move || active.token.get().is_some_and(|t| token_active(&t).is_some()), {
@@ -1225,7 +1225,7 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
                             .unwrap_or_default()
                     })
                     .variant("muted")
-                    .style(StylePatch::new().text_size(10.0))
+                    .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO)))
                 }
             })
             .el(),
@@ -1238,7 +1238,7 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
                         note.token.get().and_then(|t| t.note).unwrap_or_default()
                     })
                     .variant("muted")
-                    .style(StylePatch::new().text_size(10.0))
+                    .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::MICRO)))
                 }
             })
             .el(),

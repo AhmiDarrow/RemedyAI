@@ -1562,3 +1562,47 @@ func TestCompactTranscriptKeepsTheContextNoteWithItsRequest(t *testing.T) {
 		t.Fatalf("the opener's note was dropped or moved:\n%s", transcriptText(out))
 	}
 }
+
+func TestEngineAsksForAWordAfterSilentRounds(t *testing.T) {
+	// Eight rounds of tools with nothing said to the person, then the answer. With
+	// SilentNudgeAfter 3 a note goes in after rounds 3 and 6; with 0 none does.
+	run := func(after int) []Message {
+		var rounds atomic.Int32
+		engine := Engine{
+			Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+				n := rounds.Add(1)
+				if n > 8 {
+					return events(ModelEvent{Text: "done", Done: true}), nil
+				}
+				return events(ModelEvent{ToolCall: &ToolCall{
+					ID: fmt.Sprint(n), Name: "workspace.read", Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
+				}}), nil
+			}),
+			Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+				return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("body " + c.ID)}
+			}),
+			Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+			Config: Config{MaxIterations: 20, SoftEpochSteps: -1, SilentNudgeAfter: after},
+		}
+		out := engine.Run(context.Background(), "go")
+		if out.Err != nil {
+			t.Fatalf("err=%v", out.Err)
+		}
+		return out.Messages
+	}
+	count := func(msgs []Message) int {
+		n := 0
+		for _, m := range msgs {
+			if m.Role == RoleUser && strings.Contains(m.Text(), "hasn't heard from you") {
+				n++
+			}
+		}
+		return n
+	}
+	if got := count(run(3)); got != 2 {
+		t.Fatalf("notes after 8 silent rounds = %d, want 2", got)
+	}
+	if got := count(run(0)); got != 0 {
+		t.Fatalf("off must add no notes, got %d", got)
+	}
+}

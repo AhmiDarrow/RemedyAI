@@ -215,7 +215,7 @@ fn disclosure_button(
         .style(
             StylePatch::new()
                 .foreground(label_color)
-                .text_size(12.0)
+                .text_size(crate::tokens::size(crate::tokens::META))
                 .weight(weight),
         )
         .layout(|l| {
@@ -230,7 +230,7 @@ fn disclosure_button(
         .row()
         .align(Align::Center)
         .justify(Justify::Start)
-        .gap(6.0)
+        .gap(crate::tokens::space() * 1.5)
         .padding(Insets {
             top: 4.0,
             end: 8.0,
@@ -251,7 +251,7 @@ fn disclosure_button(
             w::text(ui, "").text(move || count_text()).nowrap().style(
                 StylePatch::new()
                     .foreground(colors.muted)
-                    .text_size(10.0)
+                    .text_size(crate::tokens::size(crate::tokens::MICRO))
                     .weight(500.0),
             ),
         );
@@ -886,7 +886,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
     let sem_id = id.clone();
 
     let text_col = w::column(ui)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
@@ -1095,7 +1095,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
         .child(text_col);
     let actions = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .layout(|l| {
             l.shrink = 0.0;
             l.min_width = Length::Px(0.0);
@@ -1188,7 +1188,7 @@ fn select_checkbox(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
             let sid = id.to_string();
             move || {
                 let on = st.selected_ids.get().iter().any(|s| s == &sid);
-                let mut p = StylePatch::new().radius(3.0);
+                let mut p = StylePatch::new().radius(crate::tokens::corner(crate::tokens::Corner::Small));
                 if on {
                     p = p.background(colors.accent).foreground(colors.on_accent);
                 } else {
@@ -1305,7 +1305,7 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
     let u = ui.clone();
     w::row(ui)
         .align(Align::Center)
-        .gap(tokens::SPACE * 2.0)
+        .gap(tokens::space() * 2.0)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -1346,7 +1346,7 @@ fn session_tag_chips(ui: &Ui, studio: &Studio, id: &str) -> El {
     let sid = id.to_string();
     let row = w::row(ui)
         .align(Align::Center)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| l.shrink = 1.0);
     let _ = row.clone().bind(move || {
         let next = st
@@ -1370,7 +1370,7 @@ fn session_tag_chips(ui: &Ui, studio: &Studio, id: &str) -> El {
                 StylePatch::new()
                     .background(colors_btn.accent.with_alpha(0.15))
                     .foreground(colors_btn.accent)
-                    .radius(3.0),
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Small)),
             )
     })
 }
@@ -1418,7 +1418,7 @@ fn tag_field(ui: &Ui, studio: &Studio, id: &str) -> El {
     let u_add = ui.clone();
     w::row(ui)
         .align(Align::Center)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);

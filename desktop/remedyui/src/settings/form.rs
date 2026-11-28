@@ -129,7 +129,7 @@ pub fn segments(ui: &Ui, name: &str, pairs: &[(&str, &str)], value: Signal<Strin
     let colors = ui.theme().colors.clone();
     let mut row = w::row(ui)
         .align(Align::Center)
-        .gap(crate::tokens::SPACE * 2.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);

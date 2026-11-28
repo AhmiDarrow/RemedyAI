@@ -143,6 +143,8 @@ type agentIdentity struct {
 	Name, Gender, UILanguage, Persona string
 	// Sarcasm is the owner's tone switch (Settings, Advanced, Tone).
 	Sarcasm bool
+	// WorkUpdates is how much she says in chat while she works (You & Agent).
+	WorkUpdates string
 }
 
 func identityFromConfig(cfg map[string]any) agentIdentity {
@@ -164,8 +166,9 @@ func identityFromConfig(cfg map[string]any) agentIdentity {
 	}
 	return agentIdentity{
 		Name: name, Gender: g, Persona: persona,
-		UILanguage: normalizeUILanguage(cfgStr(cfg, "ui_language")),
-		Sarcasm:    cfg["sarcasm_mode"] == true,
+		UILanguage:  normalizeUILanguage(cfgStr(cfg, "ui_language")),
+		Sarcasm:     cfg["sarcasm_mode"] == true,
+		WorkUpdates: NormalizeWorkUpdates(cfgStr(cfg, "work_updates")),
 	}
 }
 
@@ -174,7 +177,8 @@ func buildSystemPrompt(id agentIdentity, compact bool) string {
 	if compact {
 		body = frontierSystemCore
 	}
-	base := identityPreamble(id.Name, id.Gender) + "\n" + languageSystemLine(id.UILanguage) + "\n\n" + body
+	base := identityPreamble(id.Name, id.Gender) + "\n" + languageSystemLine(id.UILanguage) + "\n\n" + body +
+		"\n\n" + workUpdatesLine(id.WorkUpdates) + "\n\n" + showingLine
 	if add := personaAddendum(id.Persona); add != "" {
 		base += "\n\n" + add
 	}
@@ -183,6 +187,43 @@ func buildSystemPrompt(id agentIdentity, compact bool) string {
 	}
 	return base
 }
+
+// NormalizeWorkUpdates is the work_updates setting: "steps" (the default), "key" or "end".
+func NormalizeWorkUpdates(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "key":
+		return "key"
+	case "end":
+		return "end"
+	}
+	return "steps"
+}
+
+// workUpdatesLine tells her how much to say in the chat while she works. Her
+// thinking is not shown in the chat: anything meant for the person goes in the reply.
+func workUpdatesLine(mode string) string {
+	const private = "Your thinking is private working space; the person does not see it in the chat. " +
+		"Anything meant for them goes in your reply text."
+	switch NormalizeWorkUpdates(mode) {
+	case "key":
+		return "Talking while you work: this is a conversation. Write the person a short line in your reply text " +
+			"when you start, when you find something that changes the plan, when something fails, and when you finish. " + private
+	case "end":
+		return "Talking while you work: work quietly and tell the person what you did when you finish. " +
+			"If the work runs long or something important comes up, say so in a line. " + private
+	}
+	return "Talking while you work: this is a conversation, not a silent job. Before each batch of tool calls, " +
+		"write the person one or two plain sentences in your reply text: what you are about to do and why. " +
+		"When results come back, say in a sentence what you found and what comes next. " +
+		"Keep each update short, and never run a batch of tool calls without one. " + private
+}
+
+// showingLine tells her what the chat can draw, so an answer can show and not only tell.
+const showingLine = "Showing things: the chat draws Markdown, including tables, lists and headings. " +
+	"Show an image with ![what it shows](https://… or an absolute file path). " +
+	"For numbers worth seeing, draw a chart with a fenced block whose language is chart and whose body is JSON: " +
+	`{"type":"bar" or "line","title":"…","unit":"…","labels":[…],"series":[{"name":"…","values":[…]}]}. ` +
+	"Use these when they make the point clearer, not for their own sake."
 
 // sarcasmAddendum is the tone the owner turned on with the Sarcasm switch.
 const sarcasmAddendum = "Tone: the owner turned sarcasm on. Dry, teasing humour is welcome when it fits. " +
@@ -193,7 +234,13 @@ func personaAddendum(persona string) string {
 	if persona == "" {
 		return ""
 	}
-	return personaPrompts[strings.ToLower(pyStrip(persona))]
+	style := personaPrompts[strings.ToLower(pyStrip(persona))]
+	if style == "" {
+		return ""
+	}
+	// A terse style ("minimal explanation") must not read as "work in silence".
+	return style + " This is how you talk, not whether you keep the person posted: updates while you work " +
+		"follow \"Talking while you work\", in this style."
 }
 
 // runtimeInfo is the frontier half of react_stream.build_runtime_system_block.

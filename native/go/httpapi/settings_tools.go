@@ -25,6 +25,7 @@ var toolSafeSettingsKeys = map[string]struct{}{
 	"agent_gender":         {},
 	"ui_language":          {},
 	"persona":              {},
+	"work_updates":         {},
 	"show_tool_calls":      {},
 	"sarcasm_mode":         {},
 	"web_tools_enabled":    {},

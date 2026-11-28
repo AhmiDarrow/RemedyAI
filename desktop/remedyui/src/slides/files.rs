@@ -899,7 +899,7 @@ fn path_row(
 
     let crumbs = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .scroll_x()
         .layout(|l| {
             l.grow = 1.0;
@@ -1006,7 +1006,7 @@ fn path_row(
 fn places_row(ui: &Ui, model: &FilesModel, unit: f32) -> El {
     let row = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .scroll_x()
         .padding(pad(0.0, unit * 2.0))
         .layout(|l| {
@@ -1212,7 +1212,7 @@ fn list_area(
                 move || {
                     let err = m.error.get();
                     w::column(&ui)
-                        .gap(8.0)
+                        .gap(crate::tokens::space() * 2.0)
                         .padding(pad(8.0, 8.0))
                         .child(w::empty_state(&ui, "Could not list files", err))
                         .child(w::button(&ui, "Retry", {
@@ -1468,7 +1468,7 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
     };
     let open = w::row(ui)
         .align(Align::Center)
-        .gap(4.0)
+        .gap(crate::tokens::space() * 1.0)
         .layout(|l| {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
@@ -1576,7 +1576,7 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
             meta.clone().hidden(active());
         }
     });
-    let actions = w::row(ui).align(Align::Center).gap(2.0).child(reveal).child(copy);
+    let actions = w::row(ui).align(Align::Center).gap(crate::tokens::space() * 0.5).child(reveal).child(copy);
     let actions = actions.clone().bind({
         let active = active.clone();
         move || {
@@ -1585,7 +1585,7 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
     });
     let row = w::row(ui)
         .align(Align::Center)
-        .gap(6.0)
+        .gap(crate::tokens::space() * 1.5)
         .padding(remedy_ui::core::Insets {
             top: 2.0,
             bottom: 2.0,

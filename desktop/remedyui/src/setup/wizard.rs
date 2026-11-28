@@ -15,7 +15,7 @@ use super::chrome;
 use super::messengers::{self, Messenger};
 use super::model::{self, STEP_FOLDER, STEP_PROVIDER, STEP_READY, STEP_STYLE, STEP_VISION, STEP_WELCOME};
 use crate::runtime::Client;
-use crate::tokens::{typo, BODY, HERO, META, SECTION, SPACE, TITLE};
+use crate::tokens::{typo, BODY, HERO, META, SECTION, space, TITLE};
 
 #[derive(Clone)]
 pub struct Wizard {
@@ -544,7 +544,7 @@ fn welcome(ui: &Ui, wiz: Wizard) -> El {
         let face_ui = ui.clone();
         let face_mark = presence::swap(&face_ui, || Mood::Happy, 72.0);
         let face = w::column(ui)
-            .gap(SPACE)
+            .gap(space())
             .align(Align::Center)
             .layout(|l| l.width = Length::Percent(1.0))
             .child(face_mark)
@@ -846,7 +846,7 @@ fn folder_step(ui: &Ui, wiz: Wizard) -> El {
         let p_sync = path_sig.clone();
         let path_row = w::row(ui)
             .align(Align::Center)
-            .gap(SPACE)
+            .gap(space())
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
@@ -904,10 +904,12 @@ fn style_step(ui: &Ui, wiz: Wizard) -> El {
         let styles = chrome::stack(
             ui,
             vec![
-                style_card(ui, wiz.clone(), "balanced", "Balanced", "Helpful and adaptable to the task"),
-                style_card(ui, wiz.clone(), "efficient", "Efficient", "Concise, code-first, minimal explanation"),
-                style_card(ui, wiz.clone(), "detailed", "Detailed", "Thorough explanations with context"),
-                style_card(ui, wiz.clone(), "playful", "Playful", "Casual tone with light humor"),
+                style_card(ui, wiz.clone(), "balanced", "Balanced", "A trusted colleague: warm, plain and direct"),
+                style_card(ui, wiz.clone(), "warm", "Warm", "An encouraging friend, honest all the same"),
+                style_card(ui, wiz.clone(), "candid", "Candid", "Tells it straight and pushes back"),
+                style_card(ui, wiz.clone(), "efficient", "Efficient", "The answer first, few words"),
+                style_card(ui, wiz.clone(), "detailed", "Detailed", "Context, options, trade-offs and why"),
+                style_card(ui, wiz.clone(), "playful", "Playful", "Casual with light humour"),
             ],
         );
         if wiz.short.get() {

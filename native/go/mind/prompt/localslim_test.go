@@ -65,7 +65,7 @@ func TestSlimSystemCaps(t *testing.T) {
 	}
 	// win 8192: headCap 700; 952 > 900 -> first paragraph [:700] + style line.
 	got = slimSystemForLocal(long, "", "p", "m", 1, "fix it", 8192)
-	if !strings.HasPrefix(got, strings.Repeat("x", 700)+"\nStyle: concise, tool-first. Prefer action over narration.\n\nProvider:") {
+	if !strings.HasPrefix(got, strings.Repeat("x", 700)+"\nStyle: concise, tool-first. Do the work and say in a line what you are doing.\n\nProvider:") {
 		t.Error("head not trimmed")
 	}
 	// ctx over cap: win 8192 -> ctxCap 6000, keep max(2000, 5500)=5500.

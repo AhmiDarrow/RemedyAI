@@ -18,7 +18,7 @@ use remedy_ui::layout::Length;
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
 
-use crate::tokens::{typo, META, SPACE};
+use crate::tokens::{typo, META, space};
 
 /// First RemedyUI ship. Must stay greater than the last Tauri build, 0.70.5.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1071,14 +1071,14 @@ pub fn ready_notice(ui: &Ui) -> El {
             let ver = ready_signal().try_get().unwrap_or_default();
             let notes = ready_notes().try_get().unwrap_or_default();
             w::row(&ui)
-                .gap(SPACE)
+                .gap(space())
                 .fill_width()
                 .align(remedy_ui::layout::Align::Center)
                 .style(crate::tokens::raised_surface(&ui.theme().colors.clone()))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_height = Length::Px(36.0);
-                    l.padding = remedy_ui::core::Insets::symmetric(SPACE, SPACE * 2.0);
+                    l.padding = remedy_ui::core::Insets::symmetric(space(), space() * 2.0);
                 })
                 .child(
                     w::text(&ui, format!("Remedy {ver} is ready to install."))

@@ -115,6 +115,8 @@
          "choices": [
           "default",
           "balanced",
+          "warm",
+          "candid",
           "efficient",
           "concise",
           "detailed",
@@ -727,6 +729,8 @@
          "choices": [
           "default",
           "balanced",
+          "warm",
+          "candid",
           "efficient",
           "concise",
           "detailed",
@@ -1625,6 +1629,8 @@
         "choices": [
          "default",
          "balanced",
+         "warm",
+         "candid",
          "efficient",
          "concise",
          "detailed",
@@ -2536,6 +2542,8 @@
          "choices": [
           "default",
           "balanced",
+          "warm",
+          "candid",
           "efficient",
           "concise",
           "detailed",
@@ -3435,6 +3443,8 @@
          "choices": [
           "default",
           "balanced",
+          "warm",
+          "candid",
           "efficient",
           "concise",
           "detailed",

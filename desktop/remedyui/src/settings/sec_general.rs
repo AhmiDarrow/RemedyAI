@@ -56,6 +56,8 @@ fn you_agent(ui: &Ui, s: Settings) -> El {
                 "Communication style",
                 &[
                     ("balanced".into(), "Balanced".into()),
+                    ("warm".into(), "Warm".into()),
+                    ("candid".into(), "Candid".into()),
                     ("efficient".into(), "Efficient".into()),
                     ("detailed".into(), "Detailed".into()),
                     ("playful".into(), "Playful".into()),
@@ -63,15 +65,27 @@ fn you_agent(ui: &Ui, s: Settings) -> El {
                 s.persona,
             ))
             .child(persona_hint.clone())
+            .child(bits::choice(
+                ui,
+                "While she works",
+                &[("steps", "Every step"), ("key", "Key moments"), ("end", "Only at the end")],
+                s.work_updates,
+            ))
+            .child(form::hint(
+                ui,
+                "How much she tells you in the chat while she works. Every step: a line before each batch of tools and after what she finds. Key moments: when she starts, when the plan changes, when something fails, and when she is done.",
+            ))
     })
 }
 
 fn persona_hint(id: &str) -> &'static str {
     match id {
-        "efficient" => "Concise, code-first, minimal explanation.",
-        "detailed" => "Thorough explanations with context.",
-        "playful" => "Casual tone with light humor.",
-        _ => "Helpful and adaptable to the task.",
+        "warm" => "An encouraging friend: patient, notices your progress, honest all the same.",
+        "candid" => "Tells it straight: names weak spots, pushes back, gives a real recommendation.",
+        "efficient" => "A sharp peer on a deadline: the answer first, few words, still keeps you posted.",
+        "detailed" => "Walks you through it: context, options, trade-offs and why.",
+        "playful" => "Casual and warm with light humour, and drops it when something matters.",
+        _ => "A trusted colleague: warm, plain and direct, and says what she thinks.",
     }
 }
 
@@ -217,6 +231,10 @@ fn theme(ui: &Ui, s: Settings) -> El {
             .child(form::hint(ui, "Forest is the Remedy default. Colorblind palettes keep their own accents."))
             .child(rows)
             .child(bits::choice(ui, "Density", &[("cozy", "Cozy"), ("compact", "Compact")], s.density))
+            .child(bits::choice(ui, "Corners", &[("square", "Square"), ("rounded", "Rounded")], s.corners))
+            .child(bits::choice(ui, "Text edges", &[("system", "System"), ("smooth", "Smooth")], s.text_edges))
+            .child(form::hint(ui, "System uses Windows' ClearType when it is on: the crispest text on most screens. Smooth draws one shade per pixel."))
+            .child(drawing(ui))
             .child(bits::choice(
                 ui,
                 "Text size",
@@ -251,4 +269,27 @@ fn theme_pack_editor(ui: &Ui) -> El {
             "Your own tokens, on top of the selected theme. Import a pack or edit the one saved on this PC.",
         ))
         .child(remedy_ui::customize::theme_editor(ui, &custom))
+}
+
+
+/// What draws the windows. Saved for this computer and used from the next start.
+fn drawing(ui: &Ui) -> El {
+    let choice = Signal::new(crate::prefs::DesktopPrefs::load().renderer);
+    Effect::new(move || {
+        let id = choice.get();
+        if crate::prefs::DesktopPrefs::load().renderer != id {
+            crate::prefs::save_renderer(&id);
+        }
+    });
+    form::stack(ui)
+        .child(bits::choice(
+            ui,
+            "Drawing",
+            &[("auto", "Automatic"), ("gpu", "Graphics card"), ("cpu", "Processor")],
+            choice,
+        ))
+        .child(form::hint(
+            ui,
+            "Automatic starts on the processor and moves to the graphics card when the window gets busy. Applies the next time Remedy starts.",
+        ))
 }

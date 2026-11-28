@@ -204,7 +204,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
                 move || {
                     w::row(&u)
                         .align(Align::Center)
-                        .gap(6.0)
+                        .gap(crate::tokens::space() * 1.5)
                         .padding(Insets {
                             top: 4.0,
                             end: 8.0,
@@ -215,11 +215,11 @@ fn header(ui: &Ui, studio: Studio) -> El {
                             StylePatch::new()
                                 .background(accent.with_alpha(0.16))
                                 .foreground(accent)
-                                .radius(999.0),
+                                .radius(crate::tokens::corner(crate::tokens::Corner::Pill)),
                         )
                         .child(
                             u.el("live-dot")
-                                .style(StylePatch::new().background(accent).radius(999.0))
+                                .style(StylePatch::new().background(accent).radius(crate::tokens::corner(crate::tokens::Corner::Pill)))
                                 .layout(|l| {
                                     l.width = Length::Px(6.0);
                                     l.height = Length::Px(6.0);
@@ -248,10 +248,10 @@ fn header(ui: &Ui, studio: Studio) -> El {
         .justify(Justify::SpaceBetween)
         .gap(unit)
         .padding(Insets {
-            top: tokens::GUTTER,
-            end: tokens::GUTTER,
+            top: tokens::gutter(),
+            end: tokens::gutter(),
             bottom: unit * 3.0,
-            start: tokens::GUTTER,
+            start: tokens::gutter(),
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -292,12 +292,12 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
     let items_out = items.clone();
     let st = studio.clone();
     let col = w::column(ui)
-        .gap(tokens::SPACE * 2.0)
+        .gap(tokens::space() * 2.0)
         .padding(Insets {
             top: unit * 2.0,
-            end: tokens::GUTTER,
+            end: tokens::gutter(),
             bottom: unit * 2.0,
-            start: tokens::GUTTER,
+            start: tokens::gutter(),
         })
         .layout(|l| l.width = Length::Percent(1.0));
     // Whether she has said anything yet in the live turn. The list below reads
@@ -483,7 +483,7 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
         })
         .style(tokens::typo(tokens::META).foreground(colors.muted));
     let status = w::column(ui)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -559,8 +559,8 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
             w::column(ui)
                 .align(Align::Center)
                 .justify(Justify::Center)
-                .gap(tokens::GUTTER)
-                .padding(Insets::all(tokens::GUTTER))
+                .gap(tokens::gutter())
+                .padding(Insets::all(tokens::gutter()))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.grow = 1.0;
@@ -654,14 +654,14 @@ fn day_chip(ui: &Ui, label: &str) -> El {
 fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
     let colors = ui.theme().colors.clone();
     let pad = Insets {
-        top: tokens::SPACE * 2.0,
-        end: tokens::SPACE * 2.0,
-        bottom: tokens::SPACE * 2.0,
-        start: tokens::SPACE * 2.0,
+        top: tokens::space() * 2.0,
+        end: tokens::space() * 2.0,
+        bottom: tokens::space() * 2.0,
+        start: tokens::space() * 2.0,
     };
     if user {
         return w::column(ui)
-            .gap(tokens::SPACE)
+            .gap(tokens::space())
             .padding(pad)
             .layout(|l| {
                 l.max_width = Length::Px(tokens::BUBBLE_MAX);
@@ -672,7 +672,7 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
     }
     if system {
         return w::column(ui)
-            .gap(tokens::SPACE)
+            .gap(tokens::space())
             .padding(pad)
             .layout(|l| {
                 l.max_width = Length::Px(tokens::BUBBLE_MAX);
@@ -688,44 +688,93 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
             )
             .child(body);
     }
-    // Assistant: a left accent rule, no enclosing box.
-    let rule = ui
-        .el("reply-rule")
-        .layout(|l| {
-            l.width = Length::Px(2.0);
-            l.min_width = Length::Px(2.0);
-            l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+    // Her side reads as text in the conversation, the way a person writes: no box.
+    w::column(ui)
+        .gap(tokens::space())
+        .padding(Insets {
+            top: tokens::space(),
+            end: 0.0,
+            bottom: tokens::space(),
+            start: 0.0,
         })
-        .style(StylePatch::new().background(colors.accent));
-    w::row(ui)
-        .align(Align::Stretch)
-        .gap(tokens::SPACE * 2.0)
-        .padding(Insets::all(tokens::SPACE * 2.0))
         .layout(|l| {
             l.max_width = Length::Px(tokens::BUBBLE_MAX);
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
         })
-        .style(tokens::raised_surface(&colors))
-        .child(rule)
-        .child(
-            w::column(ui)
-                .gap(tokens::SPACE)
-                .padding(Insets {
-                    top: tokens::SPACE,
-                    end: tokens::SPACE,
-                    bottom: tokens::SPACE,
-                    start: 0.0,
-                })
-                .layout(|l| {
-                    l.shrink = 1.0;
-                    l.min_width = Length::Px(0.0);
-                    l.grow = 1.0;
-                })
-                .style(StylePatch::new().foreground(colors.text))
-                .child(body),
-        )
+        .style(StylePatch::new().foreground(colors.text))
+        .child(body)
+}
+
+/// A quiet line in her reply: a run of steps, or the thought she is on. Hidden while empty.
+pub(crate) fn quiet_line(ui: &Ui, prefix: &'static str, text: impl Fn() -> String + 'static) -> El {
+    let colors = ui.theme().colors.clone();
+    let text = Rc::new(text);
+    let shown = text.clone();
+    let el = w::text(ui, "")
+        .text(move || {
+            let t = shown();
+            if t.is_empty() { String::new() } else { format!("{prefix}{t}") }
+        })
+        .style(tokens::typo(tokens::META).foreground(colors.muted))
+        .layout(|l| {
+            l.max_width = Length::Px(tokens::BUBBLE_MAX);
+            l.min_width = Length::Px(0.0);
+        });
+    let flag = el.clone();
+    el.bind(move || {
+        flag.clone().hidden(text().is_empty());
+    })
+}
+
+/// Her thinking inside the message: closed it is one line (the thought she is on, or
+/// "Thinking"), open it is all of it. `live` follows the thinking as it streams.
+pub(crate) fn thinking_row(ui: &Ui, thinking: impl Fn() -> String + 'static, live: bool) -> El {
+    let colors = ui.theme().colors.clone();
+    let open = Signal::new(false);
+    let thinking = Rc::new(thinking);
+    let (head_src, body_src, has_src) = (thinking.clone(), thinking.clone(), thinking.clone());
+    let head = w::text(ui, "")
+        .text(move || {
+            let mark = if open.get() { "▾" } else { "▸" };
+            match (live, work::latest_thought(&head_src())) {
+                (true, Some(now)) if !open.get() => format!("{mark} Thinking · {now}"),
+                _ => format!("{mark} Thinking"),
+            }
+        })
+        .style(tokens::typo(tokens::META).foreground(colors.muted))
+        .on_click(move || open.update(|v| *v = !*v))
+        .semantics(move || {
+            Semantics::new(Role::Button)
+                .label("Thinking")
+                .expanded(open.get())
+                .action(Action::Click)
+        });
+    let u = ui.clone();
+    let body = show(ui, move || open.get(), move || {
+        let src = body_src.clone();
+        w::text(&u, "")
+            .text(move || src())
+            .selectable(true)
+            .style(tokens::typo(tokens::META).foreground(u.theme().colors.muted))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            })
+    })
+    .el();
+    let row = w::column(ui)
+        .gap(crate::tokens::space() * 1.0)
+        .layout(|l| {
+            l.max_width = Length::Px(tokens::BUBBLE_MAX);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(head)
+        .child(body);
+    let flag = row.clone();
+    row.bind(move || {
+        flag.clone().hidden(has_src().trim().is_empty());
+    })
 }
 
 /// When a message was said, on the local clock ("2:14 PM"). The day is the
@@ -744,7 +793,7 @@ fn speaker_meta(ui: &Ui, name: &str, created_at: Option<&str>, now: i64, user: b
     );
     let mut row = w::row(ui)
         .align(Align::Baseline)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.shrink = 1.0);
     let _ = now;
     let stamp = stamp_text(ui, created_at).map(|s| {
@@ -781,7 +830,7 @@ fn speaker_cluster(
     let head = if let Some(action) = meta_action {
         w::row(ui)
             .align(Align::Baseline)
-            .gap(tokens::SPACE)
+            .gap(tokens::space())
             .layout(|l| {
                 l.min_width = Length::Px(0.0);
                 l.shrink = 1.0;
@@ -792,7 +841,7 @@ fn speaker_cluster(
         meta
     };
     let content = w::column(ui)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| {
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
@@ -812,7 +861,7 @@ fn speaker_cluster(
     };
     let mut row = w::row(ui)
         .align(Align::Start)
-        .gap(tokens::SPACE * 2.0)
+        .gap(tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0));
     row = if user {
         row.justify(Justify::End).child(content).child(avatar)
@@ -834,33 +883,14 @@ fn with_time(ui: &Ui, card: El, at: Option<i64>) -> El {
     card
 }
 
-fn sealed_card(ui: &Ui, studio: Studio, text: &str, animate: bool) -> El {
+/// Something she said in the reply, drawn in place. No fade: a fade moved and softened the
+/// text for a moment each time a piece of her reply was finished.
+fn sealed_card(ui: &Ui, studio: Studio, text: &str) -> El {
     let body = depth::blocks(ui, text, true, {
         let st = studio;
         move |src| st.depth.show_image(src)
     });
-    let card = bubble_card(ui, body, false, false);
-    if animate {
-        maybe_seal_anim(ui, card)
-    } else {
-        card
-    }
-}
-
-fn maybe_seal_anim(ui: &Ui, el: El) -> El {
-    if runtime::spawn_disabled() || ui.reduced_motion() {
-        return el;
-    }
-    use remedy_ui::view::motion::{Easing, Motion, Target};
-    el.set_animated(Target::Opacity(0.0));
-    el.animate(
-        Target::Opacity(1.0),
-        Motion::Tween {
-            duration: ui.theme().motion.quick,
-            easing: Easing::EASE_IN_OUT,
-        },
-    );
-    el
+    bubble_card(ui, body, false, false)
 }
 
 fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
@@ -869,22 +899,24 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let assistant = msg.role == "assistant";
     let beats = mid_turn_beats(msg);
     let show_body = !msg.content.trim().is_empty();
-    let mut cards = w::column(ui).gap(8.0).layout(|l| {
+    let mut cards = w::column(ui).gap(crate::tokens::space() * 2.0).layout(|l| {
         l.width = Length::Percent(1.0);
         l.min_width = Length::Px(0.0);
     });
-    // Each card carries the time it was said, shown on hover: what she said
-    // before a tool call was said by the time of that call, and the closing
-    // text after the last result came back.
-    let said: Vec<Option<i64>> = msg
-        .steps
-        .iter()
-        .filter(|s| s.narration.as_deref().is_some_and(|n| !n.trim().is_empty()))
-        .map(|s| s.at)
-        .collect();
-    for (i, beat) in beats.iter().enumerate() {
-        let card = sealed_card(ui, studio.clone(), beat, false);
-        cards = cards.child(with_time(ui, card, said.get(i).copied().flatten()));
+    if assistant && !msg.thinking.trim().is_empty() {
+        let thinking = msg.thinking.clone();
+        cards = cards.child(thinking_row(ui, move || thinking.clone(), false));
+    }
+    // What she said before a run of steps carries the time of the first of them (hover),
+    // and the steps follow as one quiet line.
+    for (said, steps) in work::flow(&msg.steps) {
+        if let Some(text) = said {
+            let card = sealed_card(ui, studio.clone(), &text);
+            cards = cards.child(with_time(ui, card, steps.first().and_then(|s| s.at)));
+        }
+        if let Some(line) = work::steps_line(&steps) {
+            cards = cards.child(quiet_line(ui, "▸ ", move || line.clone()));
+        }
     }
     if show_body {
         let body = depth::blocks(ui, &msg.content, assistant, {
@@ -954,7 +986,7 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
     let beats_out = beats.clone();
     let st_beats = studio.clone();
     let sealed = w::column(ui)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0));
     let _ = sealed.clone().bind(move || {
         let next: Vec<(usize, String)> =
@@ -986,9 +1018,34 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
                     .nth(*i)
                     .and_then(|s| s.at)
             });
-            with_time(&u_beat, sealed_card(&u_beat, st_beat.clone(), beat, true), at)
+            let i = *i;
+            let st_line = st_beat.clone();
+            w::column(&u_beat)
+                .gap(crate::tokens::space() * 2.0)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(with_time(&u_beat, sealed_card(&u_beat, st_beat.clone(), beat), at))
+                .child(quiet_line(&u_beat, "▸ ", move || {
+                    work::flow(&st_line.live_steps.get())
+                        .into_iter()
+                        .filter(|(said, _)| said.is_some())
+                        .nth(i)
+                        .and_then(|(_, steps)| work::steps_line(&steps))
+                        .unwrap_or_default()
+                }))
         },
     );
+    // Steps she ran before saying anything.
+    let st_lead = studio.clone();
+    let lead = quiet_line(ui, "▸ ", move || {
+        work::flow(&st_lead.live_steps.get())
+            .into_iter()
+            .next()
+            .filter(|(said, _)| said.is_none())
+            .and_then(|(_, steps)| work::steps_line(&steps))
+            .unwrap_or_default()
+    });
+    let st_think = studio.clone();
+    let thought = thinking_row(ui, move || st_think.live_thinking.get(), true);
     let react_id = studio
         .live_message_id
         .get()
@@ -1009,13 +1066,14 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
         move || {
             let s = s_body.clone();
             let u = u.clone();
-            maybe_seal_anim(
-                &u,
-                bubble_card(
+            bubble_card(
                     &u,
                     live_body(&u, move || {
                         let reply = work::reply_after(&s.partial.get(), &s.live_breaks.get());
-                        if reply.trim().is_empty() {
+                        let quiet = s.partial.get().trim().is_empty()
+                            && s.live_thinking.get().trim().is_empty()
+                            && s.live_steps.get().is_empty();
+                        if reply.trim().is_empty() && quiet {
                             "…".to_string()
                         } else {
                             reply
@@ -1023,20 +1081,23 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
                     }),
                     false,
                     false,
-                ),
-            )
+                )
         },
     )
     .el();
 
     let mut cards = w::column(ui)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
-        .child(sealed);
+        .child(thought)
+        .child(lead)
+        .child(sealed)
+        .child(live);
+    // Reactions close the message, after everything she has said so far.
     if let Some(bar) = trailing {
         cards = cards.child(bar);
     }
-    let cards = cards.child(live);
+    let cards = cards;
 
     speaker_cluster(
         ui,
@@ -1132,7 +1193,7 @@ fn work_meta_row(
             l.min_height = Length::Px(6.0);
             l.shrink = 0.0;
         })
-        .style(StylePatch::new().background(dot_color).radius(3.0));
+        .style(StylePatch::new().background(dot_color).radius(crate::tokens::corner(crate::tokens::Corner::Small)));
     w::row(ui)
         .layout(|l| l.width = Length::Percent(1.0))
         .padding(Insets {
@@ -1144,7 +1205,7 @@ fn work_meta_row(
         .child(
             w::row(ui)
                 .align(Align::Center)
-                .gap(6.0)
+                .gap(crate::tokens::space() * 1.5)
                 .padding(Insets {
                     top: 2.0,
                     end: 4.0,
@@ -1323,7 +1384,7 @@ fn pack_actions(ui: &Ui, first: Option<El>, second: Option<El>) -> Option<El> {
         (Some(a), Some(b)) => Some(
             w::row(ui)
                 .align(Align::Baseline)
-                .gap(tokens::SPACE)
+                .gap(tokens::space())
                 .child(a)
                 .child(b),
         ),
@@ -1386,7 +1447,7 @@ fn open_reaction_picker(ui: &Ui, anchor: &El, studio: Studio, id: String) {
     let accent = colors.accent;
     let muted = colors.muted;
     let layer_slot: Rc<RefCell<Option<El>>> = Rc::new(RefCell::new(None));
-    let mut list = w::column(ui).gap(2.0).padding(Insets {
+    let mut list = w::column(ui).gap(crate::tokens::space() * 0.5).padding(Insets {
         top: 4.0,
         end: 4.0,
         bottom: 4.0,
@@ -1407,7 +1468,7 @@ fn open_reaction_picker(ui: &Ui, anchor: &El, studio: Studio, id: String) {
         let fg = if selected { accent } else { muted };
         let title_sem = title.clone();
         let row = w::row(ui)
-            .gap(8.0)
+            .gap(crate::tokens::space() * 2.0)
             .align(Align::Center)
             .padding(Insets {
                 top: 6.0,
@@ -1422,10 +1483,10 @@ fn open_reaction_picker(ui: &Ui, anchor: &El, studio: Studio, id: String) {
             .style(if selected {
                 StylePatch::new()
                     .background(accent.with_alpha(0.14))
-                    .radius(6.0)
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
                     .foreground(fg)
             } else {
-                StylePatch::new().radius(6.0).foreground(fg)
+                StylePatch::new().radius(crate::tokens::corner(crate::tokens::Corner::Medium)).foreground(fg)
             })
             .semantics(move || {
                 Semantics::new(Role::Button)
@@ -1454,7 +1515,7 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
     let muted = colors.muted;
     let current = current_user_reaction(&studio, &id);
 
-    let mut row = w::row(ui).gap(4.0).align(Align::Center).padding(Insets {
+    let mut row = w::row(ui).gap(crate::tokens::space() * 1.0).align(Align::Center).padding(Insets {
         top: 2.0,
         end: 0.0,
         bottom: 0.0,
@@ -1480,7 +1541,7 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
                 StylePatch::new()
                     .foreground(accent)
                     .background(accent.with_alpha(0.14))
-                    .radius(8.0)
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
             })
             .on_click(move || react(&st_press, &id_press, ""))
             .semantics(move || {
@@ -1511,7 +1572,7 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
             };
             open_reaction_picker(&open_ui, &anchor_el, st_open.clone(), id_open.clone());
         })
-        .style(StylePatch::new().foreground(muted).radius(8.0))
+        .style(StylePatch::new().foreground(muted).radius(crate::tokens::corner(crate::tokens::Corner::Medium)))
         .semantics(|| {
             Semantics::new(Role::Button)
                 .label("Add reaction")

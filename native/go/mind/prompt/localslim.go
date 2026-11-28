@@ -181,7 +181,7 @@ func slimSystemForLocal(system, context, provider, model string, maxSteps int, u
 		if i := strings.Index(head, "\n\n"); i >= 0 {
 			first = head[:i]
 		}
-		head = cut(first, headCap) + "\nStyle: concise, tool-first. Prefer action over narration."
+		head = cut(first, headCap) + "\nStyle: concise, tool-first. Do the work and say in a line what you are doing."
 	}
 	runtime := "Provider: " + provider + " · model: " + model + "\n" +
 		"Mode: local fixed-window agent · n_ctx=" + strconv.Itoa(win) + " · run until done " +

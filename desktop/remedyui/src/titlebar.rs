@@ -104,7 +104,7 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                         .style(
                             StylePatch::new()
                                 .background(u.theme().colors.card)
-                                .radius(999.0),
+                                .radius(crate::tokens::corner(crate::tokens::Corner::Pill)),
                         )
                         .layout(|l| {
                             l.width = Length::Px(72.0);
@@ -115,7 +115,7 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                                 .style(
                                     StylePatch::new()
                                         .background(u.theme().colors.accent)
-                                        .radius(999.0),
+                                        .radius(crate::tokens::corner(crate::tokens::Corner::Pill)),
                                 )
                                 .layout(|l| {
                                     l.width = Length::Percent(pct);

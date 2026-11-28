@@ -103,6 +103,8 @@ fn watch_appearance(s: Settings) {
         let _ = (
             s.theme_id.get(),
             s.density.get(),
+            s.corners.get(),
+            s.text_edges.get(),
             s.font_scale.get(),
             s.reduce_motion.get(),
             s.show_presence.get(),
@@ -227,7 +229,7 @@ fn categories(ui: &Ui, s: Settings) -> El {
 fn settings_mode_chips(ui: &Ui, s: Settings) -> El {
     w::row(ui)
         .align(Align::Center)
-        .gap(crate::tokens::SPACE * 2.0)
+        .gap(crate::tokens::space() * 2.0)
         .child(mode_chip(ui, s, "simple", "Simple"))
         .child(mode_chip(ui, s, "advanced", "Advanced"))
 }

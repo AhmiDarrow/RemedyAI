@@ -46,7 +46,7 @@ type question struct {
 	fields                   []field
 }
 
-var personaChoices = []string{"default", "balanced", "efficient", "concise", "detailed", "verbose", "playful", "sarcastic", "minimal"}
+var personaChoices = []string{"default", "balanced", "warm", "candid", "efficient", "concise", "detailed", "verbose", "playful", "sarcastic", "minimal"}
 
 var questions = []question{
 	{"names", "Names", "What should I call you, and what should you call me? You can keep Remedy, or pick another name.", "setup", []field{
@@ -136,7 +136,9 @@ var (
 		"interop_audit", "interop_trust_policy", "muscle_gpu_policy", "muscle_route", "muscle_discover",
 		"muscle_schedule", "mind_keep_gpu", "mind_handles_easy_chats")
 	personaAliases = map[string]string{
-		"balanced": "default", "efficient": "concise", "short": "concise", "brief": "concise",
+		"short": "concise", "brief": "concise",
+		"kind": "warm", "encouraging": "warm", "supportive": "warm", "friendly": "warm",
+		"blunt": "candid", "direct": "candid", "honest": "candid", "straight": "candid",
 		"thorough": "detailed", "long": "verbose", "fun": "playful", "casual": "playful",
 		"witty": "sarcastic", "dry": "sarcastic",
 	}

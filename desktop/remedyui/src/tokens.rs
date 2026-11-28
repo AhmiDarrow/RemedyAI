@@ -8,6 +8,52 @@ use remedy_ui::style::{
 
 use crate::theme_pack::{self, DepthTokens};
 
+thread_local! {
+    /// The applied look's text scale (its body size over the pack's), corner radii
+    /// and spacing unit. Settings sets them with the theme ([`adopt`]); until then, the pack's own.
+    static LOOK: std::cell::Cell<(f32, [f32; 3], f32)> =
+        std::cell::Cell::new((1.0, pack_radii(), theme_pack::current().space.unit));
+}
+
+fn pack_radii() -> [f32; 3] {
+    let r = theme_pack::current().radii;
+    [r.none, r.hair, r.hair]
+}
+
+/// The look Settings applied: every size and corner on screen follows it.
+pub fn adopt(theme: &remedy_ui::core::style::Theme) {
+    let base = theme_pack::current().typo.body.max(1.0);
+    let scale = (theme.type_scale.body / base).clamp(0.5, 3.0);
+    LOOK.with(|l| l.set((scale, [theme.radii.small, theme.radii.medium, theme.radii.large], theme.spacing.unit)));
+}
+
+/// A step of the type scale at the applied text size.
+pub fn size(t: Type) -> f32 {
+    t.size * LOOK.with(|l| l.get().0)
+}
+
+/// Corner roles. Edge (square) and Pill (fully round) are shapes, not style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Corner {
+    Edge,
+    Small,
+    Medium,
+    Large,
+    Pill,
+}
+
+/// The applied theme's radius for a corner role.
+pub fn corner(c: Corner) -> f32 {
+    let r = LOOK.with(|l| l.get().1);
+    match c {
+        Corner::Edge => 0.0,
+        Corner::Small => r[0],
+        Corner::Medium => r[1],
+        Corner::Large => r[2],
+        Corner::Pill => 999.0,
+    }
+}
+
 /// Default tool control (composer, status, title bar).
 pub const TOOL: f32 = 32.0;
 /// Glyph inside [`TOOL`].
@@ -26,9 +72,16 @@ pub const RAIL_GLYPH: f32 = 18.0;
 pub const ROW_ACTIONS: f32 = ROW_TOOL * 3.0 + 8.0;
 
 /// 4 px grid unit the shell is built on (matches the theme default).
-pub const SPACE: f32 = crate::theme_pack::MECHA.space.unit;
+/// The applied theme's spacing unit (Compact density makes it smaller).
+pub fn space() -> f32 {
+    LOOK.with(|l| l.get().2)
+}
 /// Shared gutter for headers, feeds, the composer and the sidebar.
-pub const GUTTER: f32 = crate::theme_pack::MECHA.space.gutter;
+/// The gutter, at the applied theme's spacing.
+pub fn gutter() -> f32 {
+    let pack = theme_pack::current().space;
+    pack.gutter * space() / pack.unit.max(1.0)
+}
 /// Persona badge (square, hairline).
 pub const AVATAR: f32 = crate::theme_pack::MECHA.layout.presence_avatar;
 /// Chat bubble cap, inside a split pane.
@@ -115,10 +168,38 @@ pub const THINKING: Type = Type {
     display: false,
 };
 
+/// Badges and counters.
+pub const MICRO: Type = Type {
+    size: 10.0,
+    weight: 600.0,
+    leading: 1.2,
+    tracking: 0.02,
+    mono: false,
+    display: false,
+};
+/// Captions under controls.
+pub const CAPTION: Type = Type {
+    size: 11.0,
+    weight: 500.0,
+    leading: 1.3,
+    tracking: 0.02,
+    mono: false,
+    display: false,
+};
+/// Labels on chips, tabs and small buttons.
+pub const LABEL: Type = Type {
+    size: 13.0,
+    weight: 500.0,
+    leading: 1.35,
+    tracking: 0.0,
+    mono: false,
+    display: false,
+};
+
 /// Style for one step on the type scale.
 pub fn typo(t: Type) -> StylePatch {
     let mut p = StylePatch::new()
-        .text_size(t.size)
+        .text_size(size(t))
         .weight(t.weight)
         .line_height(LineHeight::Relative(t.leading));
     if t.tracking != 0.0 {
@@ -264,7 +345,7 @@ pub fn raised_surface(colors: &ColorRoles) -> StylePatch {
         .background(surface_raised(colors))
         .border(hairline(colors))
         .shadow(elevation(colors))
-        .radius(2.0)
+        .radius(corner(Corner::Small))
 }
 
 /// Overlay plane for menus and popovers.
@@ -274,7 +355,7 @@ pub fn overlay_surface(colors: &ColorRoles) -> StylePatch {
         .background(surface_overlay(colors))
         .border(hairline(colors))
         .shadow(elevation_overlay(colors))
-        .radius(2.0)
+        .radius(corner(Corner::Small))
 }
 
 /// Panel sitting on the void: hairline only, no drop shadow.
@@ -283,7 +364,7 @@ pub fn panel_surface(colors: &ColorRoles) -> StylePatch {
         .background(surface_panel(colors))
         .border(hairline(colors))
         .border_width(1.0)
-        .radius(2.0)
+        .radius(corner(Corner::Small))
 }
 
 /// Sunken well for inputs, code, and the chat composer.
@@ -292,7 +373,7 @@ pub fn well_surface(colors: &ColorRoles) -> StylePatch {
     bevel_edges(d.well, d.highlight)
         .background(colors.bg)
         .border(hairline(colors))
-        .radius(2.0)
+        .radius(corner(Corner::Small))
 }
 
 /// Hover: lift the plane and use the earth edge.
@@ -335,10 +416,10 @@ pub fn chip(colors: &ColorRoles, on: bool) -> StylePatch {
 /// A primary action in the hairline system: accent stroke and text, no fill.
 pub fn primary_button(colors: &ColorRoles) -> StylePatch {
     chip(colors, true).weight(600.0).padding(Insets {
-        top: SPACE * 2.0,
-        end: SPACE * 3.0,
-        bottom: SPACE * 2.0,
-        start: SPACE * 3.0,
+        top: space() * 2.0,
+        end: space() * 3.0,
+        bottom: space() * 2.0,
+        start: space() * 3.0,
     })
 }
 
@@ -357,8 +438,8 @@ pub fn info_panel(ui: &remedy_ui::Ui, title: impl Into<String>, body: remedy_ui:
     let colors = ui.theme().colors.clone();
     let title = title.into();
     w::column(ui)
-        .gap(SPACE * 2.0)
-        .padding(Insets::all(SPACE * 3.0))
+        .gap(space() * 2.0)
+        .padding(Insets::all(space() * 3.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -377,6 +458,25 @@ pub fn info_panel(ui: &remedy_ui::Ui, title: impl Into<String>, body: remedy_ui:
 mod tests {
     use super::*;
 
+/// Sizes and corners follow the theme Settings applied: its text size and its radii.
+    #[test]
+    fn sizes_and_corners_follow_the_applied_theme() {
+        let mut theme = remedy_ui::core::style::Theme::dark_forest();
+        let base = theme_pack::current().typo.body;
+        theme.type_scale.body = base * 1.3;
+        theme.radii.small = 6.0;
+        theme.radii.medium = 10.0;
+        theme.radii.large = 14.0;
+        adopt(&theme);
+        assert!((size(META) - META.size * 1.3).abs() < 0.01, "every role scales with the text size");
+        assert!((size(MICRO) - MICRO.size * 1.3).abs() < 0.01);
+        assert_eq!((corner(Corner::Small), corner(Corner::Medium), corner(Corner::Large)), (6.0, 10.0, 14.0));
+        assert_eq!((corner(Corner::Edge), corner(Corner::Pill)), (0.0, 999.0));
+        theme.type_scale.body = base;
+        adopt(&theme);
+        assert!((size(BODY) - BODY.size).abs() < 0.01);
+    }
+
     #[test]
     fn scale_steps_are_distinct() {
         assert_eq!(HERO.size, 24.0);
@@ -394,4 +494,10 @@ mod tests {
         assert_eq!(TITLE.size % 8.0, 0.0);
         assert!(TITLE.weight > BODY.weight);
     }
+}
+
+/// Readable text on a filled colour (an accent, a danger button): dark on light, light on dark.
+pub fn on_color(c: Color) -> Color {
+    let y = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    if y > 0.62 { Color::BLACK } else { Color::WHITE }
 }

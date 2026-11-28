@@ -375,7 +375,7 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                             l.width = Length::Px(8.0);
                             l.height = Length::Px(8.0);
                         })
-                        .style(StylePatch::new().background(colors.accent).radius(8.0))
+                        .style(StylePatch::new().background(colors.accent).radius(crate::tokens::corner(crate::tokens::Corner::Medium)))
                         .semantics(Semantics::new(Role::Status).label("Remedy is working"))
                 }
             })

@@ -26,7 +26,7 @@ use crate::depth::TodoItem;
 use crate::runtime::{self, spawn_disabled};
 use crate::studio::{ChatMessage, Studio};
 use crate::tokens;
-use crate::work::{self, StepStatus, WorkStep};
+use crate::work::{self, short_tool, StepStatus, WorkStep};
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
@@ -267,12 +267,12 @@ impl FloatCtl {
                 let win_top = window.clone();
                 let chrome = w::row(ui)
                     .align(Align::Center)
-                    .gap(8.0)
-                    .padding(Insets::all(8.0))
+                    .gap(crate::tokens::space() * 2.0)
+                    .padding(Insets::all(crate::tokens::space() * 2.0))
                     .layout(|l| l.width = Length::Percent(1.0))
                     .child(
                         w::text(ui, title)
-                            .style(StylePatch::new().weight(600.0).text_size(13.0)),
+                            .style(StylePatch::new().weight(600.0).text_size(crate::tokens::size(crate::tokens::LABEL))),
                     )
                     .child(w::row(ui).layout(|l| {
                         l.grow = 1.0;
@@ -605,14 +605,14 @@ fn tab_btn(ui: &Ui, mobile: Signal<MobilePane>, which: MobilePane, key: &'static
             let colors = colors.clone();
             let active = active.clone();
             move || {
-                let mut p = StylePatch::new().radius(2.0).text_size(12.0).weight(600.0);
+                let mut p = StylePatch::new().radius(crate::tokens::corner(crate::tokens::Corner::Small)).text_size(crate::tokens::size(crate::tokens::META)).weight(600.0);
                 if active() {
                     p = tokens::selected_surface(&colors)
-                        .text_size(12.0)
+                        .text_size(crate::tokens::size(crate::tokens::META))
                         .weight(600.0)
                         .foreground(colors.text);
                 } else {
-                    p = p.foreground(colors.muted).radius(2.0);
+                    p = p.foreground(colors.muted).radius(crate::tokens::corner(crate::tokens::Corner::Small));
                 }
                 p
             }
@@ -885,7 +885,7 @@ fn pane_head(
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let titles = w::column(ui)
-        .gap(1.0)
+        .gap(crate::tokens::space() * 0.25)
         .layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
@@ -916,9 +916,9 @@ fn pane_head(
         .gap(unit)
         .padding(Insets {
             top: 8.0,
-            end: tokens::GUTTER,
+            end: tokens::gutter(),
             bottom: 8.0,
-            start: tokens::GUTTER,
+            start: tokens::gutter(),
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -981,8 +981,8 @@ fn swap_btn(ui: &Ui, prefs: Signal<ChatSplit>, in_tabs: bool) -> El {
     .variant("quiet")
     .style(
         StylePatch::new()
-            .radius(8.0)
-            .text_size(if in_tabs { 16.0 } else { 15.0 }),
+            .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
+            .text_size(crate::tokens::size(if in_tabs { crate::tokens::TITLE } else { crate::tokens::BODY })),
     )
     .semantics({
         let u = u;
@@ -1054,11 +1054,11 @@ fn float_tools_row(
             .variant("quiet")
             .style(
                 StylePatch::new()
-                    .radius(2.0)
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Small))
                     .border(tokens::hairline(&colors))
                     .border_width(1.0)
                     .shadow(tokens::elevation(&colors))
-                    .text_size(12.0)
+                    .text_size(crate::tokens::size(crate::tokens::META))
                     .weight(550.0),
             )
     };
@@ -1287,7 +1287,7 @@ fn handle_el(ui: &Ui, prefs: Signal<ChatSplit>, line: remedy_ui::core::Color) ->
                 .style(move || {
                     StylePatch::new()
                         .background(if hot.get() { grip } else { line })
-                        .radius(1.0)
+                        .radius(crate::tokens::corner(crate::tokens::Corner::Small))
                 }),
         )
         .cursor(remedy_ui::input::Cursor::ColResize)
@@ -1408,9 +1408,9 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
             .gap(unit * 3.0)
             .padding(Insets {
                 top: 12.0,
-                end: tokens::GUTTER,
-                bottom: tokens::GUTTER,
-                start: tokens::GUTTER,
+                end: tokens::gutter(),
+                bottom: tokens::gutter(),
+                start: tokens::gutter(),
             })
             .layout(|l| l.width = Length::Percent(1.0));
         let st = studio.clone();
@@ -1421,7 +1421,7 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
             }
         });
         let (u, st_rows) = (ui.clone(), studio.clone());
-        let col = w::for_each(&col, turns, |t| t.id.clone(), move |t| {
+        let col = w::for_each(&col, turns, ActionTurn::key, move |t| {
             action_turn(&u, st_rows.clone(), t.clone(), expanded, process_open)
         });
         w::scroll(ui)
@@ -1440,7 +1440,7 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
 fn actions_standby(ui: &Ui) -> El {
     let colors = ui.theme().colors.clone();
     let body = w::column(ui)
-        .gap(tokens::SPACE * 2.0)
+        .gap(tokens::space() * 2.0)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -1470,7 +1470,7 @@ fn actions_standby(ui: &Ui) -> El {
         })
         .child(
             w::column(ui)
-                .padding(Insets::all(tokens::GUTTER))
+                .padding(Insets::all(tokens::gutter()))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
@@ -1495,6 +1495,27 @@ struct ActionTurn {
     live: bool,
     session_id: String,
     request_id: String,
+}
+
+impl ActionTurn {
+    /// The list builds a row once per key. A finished turn never changes, so its id is
+    /// enough. The live turn grows while it runs: its key moves with each step that starts
+    /// or ends, each todo change and each new paragraph of thinking, so its row is built
+    /// again as the work happens (not on every streamed word).
+    fn key(&self) -> String {
+        if !self.live {
+            return self.id.clone();
+        }
+        let steps: Vec<String> = self.steps.iter().map(|s| format!("{}:{:?}", s.id, s.status)).collect();
+        let todos: Vec<String> = self.todos.iter().map(|t| format!("{}:{}", t.content, t.status)).collect();
+        format!(
+            "{}|live|{}|{}|{}",
+            self.id,
+            steps.join(","),
+            todos.join(","),
+            thinking_chunks(&self.thinking).len()
+        )
+    }
 }
 
 fn collect_turns(studio: &Studio) -> Vec<ActionTurn> {
@@ -1622,7 +1643,7 @@ fn thinking_block(ui: &Ui, id: &str, thinking: &str, expanded: Signal<Vec<String
     let u = ui.clone();
     let header = w::row(ui)
         .align(Align::Center)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .on_click(toggle)
         .semantics({
@@ -1642,7 +1663,7 @@ fn thinking_block(ui: &Ui, id: &str, thinking: &str, expanded: Signal<Vec<String
     let u_body = ui.clone();
     let body = show(ui, open, move || {
         let mut paras = w::column(&u_body)
-            .gap(tokens::SPACE)
+            .gap(tokens::space())
             .layout(|l| l.width = Length::Percent(1.0));
         for para in &chunks {
             paras = paras.child(thinking_para(&u_body, para));
@@ -1651,7 +1672,7 @@ fn thinking_block(ui: &Ui, id: &str, thinking: &str, expanded: Signal<Vec<String
     })
     .el();
     w::column(ui)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| l.width = Length::Percent(1.0))
         .child(header)
         .child(body)
@@ -1936,7 +1957,7 @@ fn process_group(
     };
     let mut head = w::row(ui)
         .align(Align::Center)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .on_click(toggle)
         .semantics({
@@ -2024,7 +2045,7 @@ fn process_group(
     })
     .el();
     w::column(ui)
-        .gap(tokens::SPACE)
+        .gap(tokens::space())
         .layout(|l| l.width = Length::Percent(1.0))
         .child(head)
         .child(body_view)
@@ -2158,16 +2179,7 @@ fn process_dump(ui: &Ui, text: impl Fn() -> String + 'static, failed: bool) -> E
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         })
-        .style(tokens::typo(tokens::MONO).foreground(fg).text_size(12.0))
-}
-
-fn short_tool(name: &str) -> String {
-    let trimmed = name.rsplit([':', '/']).next().unwrap_or(name);
-    let mut chars = trimmed.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str().replace('_', " ").as_str(),
-        None => trimmed.to_string(),
-    }
+        .style(tokens::typo(tokens::MONO).foreground(fg).text_size(crate::tokens::size(crate::tokens::META)))
 }
 
 fn build_block(ui: &Ui, todos: &[TodoItem]) -> El {
@@ -2201,7 +2213,7 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
     };
     w::row(ui)
         .align(Align::Start)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .semantics({
             let label = format!("{mark} {}", item.content);
@@ -2218,7 +2230,7 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
                 .style(
                     tokens::typo(tokens::BODY)
                         .foreground(colors.text)
-                        .text_size(13.5),
+                        .text_size(crate::tokens::size(crate::tokens::LABEL)),
                 ),
         )
 }
@@ -2226,6 +2238,31 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The live turn's row is rebuilt as the work happens; a finished one is built once.
+    #[test]
+    fn the_live_turn_is_rebuilt_as_it_grows() {
+        let turn = |live: bool, steps: Vec<WorkStep>, thinking: &str| ActionTurn {
+            id: "m1".into(),
+            thinking: thinking.into(),
+            steps,
+            todos: Vec::new(),
+            live,
+            session_id: "s".into(),
+            request_id: "r".into(),
+        };
+        let start = turn(true, Vec::new(), "Looking at the build.");
+        let mut step = WorkStep::done("1", "bash");
+        step.status = crate::work::StepStatus::Running;
+        let running = turn(true, vec![step], "Looking at the build.");
+        let done = turn(true, vec![WorkStep::done("1", "bash")], "Looking at the build.");
+        let more = turn(true, vec![WorkStep::done("1", "bash")], "Looking at the build.\n\nNow the tests.");
+        let keys = [start.key(), running.key(), done.key(), more.key()];
+        for pair in keys.windows(2) {
+            assert_ne!(pair[0], pair[1], "each change of the live turn is a new row");
+        }
+        assert_eq!(turn(false, vec![WorkStep::done("1", "bash")], "x").key(), "m1");
+    }
 
     #[test]
     fn a_group_is_failed_only_when_every_step_failed() {

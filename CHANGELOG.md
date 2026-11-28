@@ -16,6 +16,14 @@ All notable changes to Remedy are documented here.
 - The Files rail shows each entry's size and age, sorts by newest or largest as well as by name, and has a right-click menu (open, reveal, copy path, copy name). The reveal and copy buttons are icons that appear on the row under the pointer.
 
 ### Changed
+- Remedy talks with you while she works. Her reply is one flowing message: what she says, a quiet line for each run of steps (and what is running now), and a Thinking line that shows the thought she is on and opens to all of it. She is told to say a line before each batch of tools and what she found after, and that her thinking is not shown in the chat. Several silent rounds in a row get a short nudge (at most three a turn). This works the same for every provider.
+- You & Agent, While she works: Every step (default), Key moments or Only at the end.
+- Communication styles read as kinds of colleague, and every style keeps you posted. New: Warm and Candid. The setup wizard and house rules offer the same six.
+- A message sent while she works is answered in a line and the work goes on, unless it says to stop or change course. One sent as her turn was ending is no longer lost: it goes out next.
+- The actions pane follows the work as it happens. It used to catch up only when the turn ended, and the todo list repeated under each part of a reply.
+- Replies can show tables, lists, headings, quotes and charts (a `chart` block of JSON, bar or line). Links in replies open in Remedy's browser.
+- Every text size, corner, colour and space comes from the theme, so the text size and density settings reach the whole window. Appearance adds Corners (Square or Rounded) and Drawing (Automatic, Graphics card or Processor).
+- A checklist step reads as progress ("1 of 3 done · now: …") instead of its raw data.
 - Hovering a card in a reply shows when it was said. A long reply is drawn as several cards (what she said before each tool call, then the closing text) and only the first had a time. The runtime now records when each tool call was made and when its result came back; replies saved before this show the reply's own time on the closing card only. Grove's bubbles show their time on hover too.
 - The chat stays fast in a long conversation. Studio and Grove build the 40 most recent messages and load earlier ones with "Show earlier messages". Every message used to be built, and each streamed word laid the whole conversation out again: at 400 messages a word cost 37 ms, a tool step 32 ms and opening the conversation 750 ms; they are now 4 ms, 3 ms and 100 ms, and no longer grow with length. Keeping the view at the newest message schedules one pair of follow-up scrolls, not a pair per word.
 - Remedy has one mood, decided by the runtime from what she is doing (a turn running anywhere, a tool or thinking, her own night work, how the last turn went). Grove, Studio and a paired phone all show it. Each surface used to work a mood out from its own conversation, so two surfaces showed two moods. Her curious face (you are typing to her) and her surprised face (the first message of a conversation) are part of that one mood too: a surface tells the runtime when you type. A surface that cannot reach the runtime shows its own error face.
@@ -38,6 +46,10 @@ All notable changes to Remedy are documented here.
 - The `remedy` command line runs in the Go runtime. The pip package (`remedy-ai`) is gone: install with the installers from the releases page, or on a machine without a desktop with the install script (`scripts/install.sh`, `scripts/install.ps1`). `remedy-mcp` is now `remedy mcp serve`, and `remedy update` checks the release feed and says how to update.
 - Usage, Harness shows what the runtime measured for the session: context fill, the compaction budget, turns, tokens saved, tool and provider results. It no longer lists figures nothing produced (nudges, stuck rate, goals).
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.
+
+### Removed
+- The progress bar and Trace strip under the chat. The steps show in the reply and in the actions pane.
+- The fade-in on finished parts of a reply, which moved and softened the text for a moment.
 
 ### Fixed
 - With any text size but Medium the app hung on "Starting Remedy". Building Grove reset the house theme, which dropped the chosen size; Settings put it back, which built Grove again, without end. A window whose look Settings set is now left alone.

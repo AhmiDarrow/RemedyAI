@@ -814,6 +814,15 @@ func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 		}
 	}
 	cfg.ContextTrimAt, cfg.ContextCompactAt = harnessShares(loadHomeConfig(r.HomeDir))
+	// The same for every provider: a note in the conversation, not a vendor option.
+	switch prompt.NormalizeWorkUpdates(cfgString(loadHomeConfig(r.HomeDir), "work_updates", "")) {
+	case "steps":
+		cfg.SilentNudgeAfter = 3
+	case "key":
+		cfg.SilentNudgeAfter = 6
+	default:
+		cfg.SilentNudgeAfter = 0
+	}
 	if req.MaxIterations > 0 {
 		// Explicit budgets (e.g. hive foragers) are absolute ceilings only.
 		cfg.MaxIterations = req.MaxIterations

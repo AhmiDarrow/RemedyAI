@@ -82,13 +82,13 @@ fn header(ui: &Ui, ws: &Workspace, unit: f32, colors: &remedy_ui::style::ColorRo
         .truncate();
     let mut row = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .padding(pad(unit * 0.5, unit))
         .style(
             StylePatch::new()
                 .background(colors.panel)
                 .foreground(colors.text)
-                .text_size(12.0)
+                .text_size(crate::tokens::size(crate::tokens::META))
                 .weight(600.0),
         )
         .child(title.layout(|l| {

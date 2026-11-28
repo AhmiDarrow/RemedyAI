@@ -188,7 +188,7 @@ impl HelpPanel {
         w::fill_window(ui.el("scrim"))
             .column()
             .focus_scope()
-            .style(StylePatch::new().background(Color::BLACK.with_alpha(0.48)))
+            .style(StylePatch::new().background(crate::tokens::depth().shadow.with_alpha(0.48)))
             .padding(Insets {
                 top: 24.0,
                 end: 24.0,
@@ -340,7 +340,7 @@ impl HelpPanel {
 
     fn toc(&self, ui: &Ui) -> El {
         let unit = ui.theme().spacing.unit;
-        let list = ui.el("help_toc").column().fill_width().gap(2.0);
+        let list = ui.el("help_toc").column().fill_width().gap(crate::tokens::space() * 0.5);
         let list_key = list.clone();
         let panel = self.clone();
         let ui_toc = ui.clone();
@@ -515,7 +515,7 @@ impl HelpPanel {
                 start: unit * 4.0,
             })
             .style(StylePatch::new().background(colors.panel).border_side(BorderEdge::Bottom, BorderSide::new(1.0, line)));
-        let titles = ui.el("help_titles").column().grow(1.0).gap(2.0);
+        let titles = ui.el("help_titles").column().grow(1.0).gap(crate::tokens::space() * 0.5);
         let titles_key = titles.clone();
         let panel = self.clone();
         let ui_head = ui.clone();
@@ -738,7 +738,7 @@ fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_pre
         .el("help_toc_label")
         .column()
         .grow(1.0)
-        .gap(1.0)
+        .gap(crate::tokens::space() * 0.25)
         .layout(|l| {
             l.min_width = Length::Px(0.0);
             l.shrink = 1.0;
@@ -765,7 +765,7 @@ fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_pre
         .row()
         .align(Align::Center)
         .justify(Justify::Start)
-        .gap(8.0)
+        .gap(crate::tokens::space() * 2.0)
         .fill_width()
         .padding(Insets {
             top: 6.0,

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/prompt"
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
@@ -39,7 +40,7 @@ func themeFromConfig(cfg ConfigMap) string {
 var settableKeys = map[string]struct{}{
 	"llm_provider": {}, "llm_model": {}, "llm_base_url": {}, "custom_llm_name": {},
 	"llm_api_key": {}, "project_path": {}, "default_workspace": {}, "name": {}, "user_name": {},
-	"agent_gender": {}, "ui_language": {}, "persona": {}, "setup_completed": {},
+	"agent_gender": {}, "ui_language": {}, "persona": {}, "work_updates": {}, "setup_completed": {},
 	"access_scope": {}, "launch_at_login": {}, "start_in_tray": {}, "close_to_tray": {},
 	"harness_mode": {}, "harness_min_context_pct": {}, "harness_max_context_pct": {},
 	"finish_checks": {}, "shell": {},
@@ -543,6 +544,9 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	if v, ok := patch["update_check"]; ok && v != nil {
 		patch["update_check"] = normalizeUpdateCheck(fmt.Sprint(v))
 	}
+	if v, ok := patch["work_updates"]; ok && v != nil {
+		patch["work_updates"] = prompt.NormalizeWorkUpdates(fmt.Sprint(v))
+	}
 	if v, ok := patch["agent_gender"]; ok && v != nil {
 		g := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
 		if g != "female" && g != "male" && g != "neutral" {
@@ -792,6 +796,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"ui_language":                  cfgString(cfg, "ui_language", "auto"),
 		"ui_languages":                 publicLanguageList(),
 		"persona":                      cfgString(cfg, "persona", "default"),
+		"work_updates":                 prompt.NormalizeWorkUpdates(cfgString(cfg, "work_updates", "")),
 		"project_path":                 projectPath,
 		"default_workspace":            cfgString(cfg, "default_workspace", ""),
 		"default_workspace_path":       defaultOwnerFilesBaseConfigured(cfgString(cfg, "default_workspace", "")),
