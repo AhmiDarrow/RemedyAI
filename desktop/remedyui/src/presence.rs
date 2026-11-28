@@ -730,16 +730,22 @@ fn draw_with(ui: &Ui, mood: Mood, size: f32, stage: u8, grow: Option<(u64, face_
         let blink_b = blink.clone();
         let glance_b = glance.clone();
         let settle_b = settle.clone();
+        // The offset last applied. This runs on every tick, blink and glance;
+        // touching the layout each time re-laid out the window every 600 ms
+        // for a face that moves one pixel every few seconds.
+        let applied = std::cell::Cell::new(f32::NAN);
         frame.clone().bind(move || {
             let p = phase_b.get();
             let breath = if do_breath && p % 8 >= 4 { 1.0 } else { 0.0 };
-            let settle_y = settle_b.get() as f32;
-            frame_b.clone().layout(move |l| {
-                // The face moves; what is laid out after it must not: the same
-                // amount comes back off the bottom, so its box stays put.
-                l.margin.top = breath + settle_y;
-                l.margin.bottom = -(breath + settle_y);
-            });
+            let offset = breath + settle_b.get() as f32;
+            if applied.replace(offset) != offset {
+                frame_b.clone().layout(move |l| {
+                    // The face moves; what is laid out after it must not: the same
+                    // amount comes back off the bottom, so its box stays put.
+                    l.margin.top = offset;
+                    l.margin.bottom = -offset;
+                });
+            }
             let _ = blink_b.get();
             let _ = glance_b.get();
         });
