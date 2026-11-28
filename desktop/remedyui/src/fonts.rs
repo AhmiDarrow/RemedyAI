@@ -143,6 +143,12 @@ pub fn apply_to_theme(theme: &mut Theme, fonts: &Fonts) {
 
 /// Installs [`apply_to_theme`] on this UI if the tokens are not already set.
 pub fn prepare_theme(ui: &remedy_ui::Ui, fonts: &Fonts) {
+    // Settings' look already holds these tokens, scaled to the chosen text size. Resetting
+    // it here made Settings paint it again, which rebuilt this surface, which reset it:
+    // the app hung on "Starting Remedy" with any text size but Medium.
+    if crate::settings::look_applied(ui) {
+        return;
+    }
     let mut theme = ui.theme();
     let before = theme.clone();
     apply_to_theme(&mut theme, fonts);
