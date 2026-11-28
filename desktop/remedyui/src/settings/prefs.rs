@@ -27,6 +27,15 @@ thread_local! {
     /// The app's other windows (a popped-out pane), each `None` once closed.
     static EXTRA: RefCell<Vec<Box<dyn Fn() -> Option<Ui>>>> = RefCell::new(Vec::new());
     static LOOK: RefCell<Option<remedy_ui::reactive::Signal<u64>>> = const { RefCell::new(None) };
+    /// The windows Settings has given their look.
+    static PAINTED: RefCell<Vec<remedy_ui::view::WeakUi>> = const { RefCell::new(Vec::new()) };
+}
+
+/// True once Settings has given `ui` its look (theme, fonts, text size). From then on that
+/// window's look is Settings' alone: a surface being built must not reset it, or the reset
+/// and Settings' answer to it rebuild each other without end.
+pub(crate) fn look_applied(ui: &Ui) -> bool {
+    PAINTED.with(|p| p.borrow().iter().filter_map(|w| w.upgrade()).any(|u| u.is_same(ui)))
 }
 
 /// Counts the changes of the look (theme, accent, density, text size). A surface copies
@@ -74,10 +83,23 @@ pub fn bind_window(ui: &Ui) {
     let weak = ui.downgrade();
     EXTRA.with(|e| e.borrow_mut().push(Box::new(move || weak.upgrade())));
     if let Some(main) = UI.with(|c| c.borrow().clone()) {
+        if look_applied(&main) {
+            mark_painted(ui);
+        }
         let theme = main.theme();
         let sheet = sheet(&theme);
         ui.set_theme(theme, sheet);
     }
+}
+
+fn mark_painted(ui: &Ui) {
+    PAINTED.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|w| w.upgrade().is_some());
+        if !p.iter().filter_map(|w| w.upgrade()).any(|u| u.is_same(ui)) {
+            p.push(ui.downgrade());
+        }
+    });
 }
 
 pub fn bind_ui(ui: &Ui) {
@@ -204,6 +226,7 @@ pub fn apply(s: Settings) {
     EXTRA.with(|e| {
         e.borrow_mut().retain(|window| {
             let Some(other) = window() else { return false };
+            mark_painted(&other);
             other.set_theme(theme.clone(), sheet(&theme));
             true
         })
@@ -273,6 +296,7 @@ fn parse_accent(raw: &str) -> Option<Color> {
 
 /// Gives the window `theme`, and has the surfaces that copied the old one built again.
 fn paint(ui: &Ui, theme: remedy_ui::core::style::Theme) {
+    mark_painted(ui);
     let changed = ui.theme() != theme;
     let sheet = sheet(&theme);
     ui.set_theme(theme, sheet);
@@ -365,6 +389,37 @@ mod look_tests {
     use remedy_ui::testing::TestApp;
     use remedy_ui::widgets as w;
     use std::rc::Rc;
+
+    /// A larger text size, then a surface that prepares the house theme while it is built
+    /// (Grove's frame does). Preparing must not undo the size: when it did, Settings
+    /// painted it again, which rebuilt the surface, without end ("Starting Remedy" hung).
+    #[test]
+    fn a_surface_built_again_keeps_the_chosen_text_size() {
+        let built: Rc<RefCell<usize>> = Rc::default();
+        let mut app = TestApp::window({
+            let built = built.clone();
+            move |ui, _| {
+                bind_ui(ui);
+                let built = built.clone();
+                let surface = with_look(ui, false, move |ui| {
+                    *built.borrow_mut() += 1;
+                    assert!(*built.borrow() < 20, "the look and the surface rebuild each other");
+                    crate::fonts::prepare_theme(ui, &crate::fonts::Fonts::load());
+                    w::text(ui, "surface")
+                });
+                ui.root().child(surface);
+            }
+        });
+        app.frames(2);
+        let ui = app.ui().expect("window");
+        let mut large = ui.theme();
+        crate::fonts::apply_to_theme(&mut large, &crate::fonts::Fonts::load());
+        large.type_scale.body *= 1.15;
+        paint(&ui, large.clone());
+        app.frames(3);
+        assert_eq!(ui.theme().type_scale.body, large.type_scale.body, "the text size stays");
+        assert!(*built.borrow() <= 3, "built {} times", built.borrow());
+    }
 
     /// A surface copies colours while it is built. Under `with_look` a theme change
     /// builds it again, so the copy is the new theme's; the same theme again does not.

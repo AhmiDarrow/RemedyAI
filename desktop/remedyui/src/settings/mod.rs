@@ -11,7 +11,7 @@ mod http;
 pub(crate) mod logic;
 mod panel;
 mod prefs;
-pub(crate) use prefs::with_look;
+pub(crate) use prefs::{look_applied, with_look};
 mod sec_general;
 mod sec_connectors;
 mod sec_links;
