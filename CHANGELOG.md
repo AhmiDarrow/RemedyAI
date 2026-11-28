@@ -4,7 +4,7 @@ All notable changes to Remedy are documented here.
 
 ## [Unreleased]
 
-## [2.1.1] - 2026-11-27
+## [2.1.2] - 2026-11-28
 
 ### Added
 - Connectors: Remedy can use MCP servers you add (GitHub and other services), by URL or as a command on this computer. Settings → Connections → Connectors adds, removes and reconnects them and shows each one's state and tools; `/connectors` lists them. A connector's tools wait for you in Auto unless you set that connector to run without asking, and a message from outside can never use one. Tokens are kept in the secret store. Built on the official MCP Go SDK.
@@ -34,7 +34,7 @@ All notable changes to Remedy are documented here.
 - Removed: a no-progress check that could not fire, `[execution]` settings nothing read, and `REMEDY_LOCAL_CTX` shrinking a cloud model's window.
 - Frontier-sized tool and context limits: tool results keep 100,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 - The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
-- One version number, 2.1.1, for the desktop, the phone app, the runtime and the command line.
+- One version number, 2.1.2, for the desktop, the phone app, the runtime and the command line.
 - The `remedy` command line runs in the Go runtime. The pip package (`remedy-ai`) is gone: install with the installers from the releases page, or on a machine without a desktop with the install script (`scripts/install.sh`, `scripts/install.ps1`). `remedy-mcp` is now `remedy mcp serve`, and `remedy update` checks the release feed and says how to update.
 - Usage, Harness shows what the runtime measured for the session: context fill, the compaction budget, turns, tokens saved, tool and provider results. It no longer lists figures nothing produced (nudges, stuck rate, goals).
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.

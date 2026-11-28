@@ -38,7 +38,7 @@ SetCompressor /SOLID lzma
 CRCCheck on
 
 !ifndef VERSION
-  !define VERSION "2.1.1"
+  !define VERSION "2.1.2"
 !endif
 !ifndef PRODUCTNAME
   !define PRODUCTNAME "Remedy Desktop"

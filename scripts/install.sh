@@ -7,7 +7,7 @@
 # the current user. Nothing is installed system-wide and nothing needs root.
 #
 #   sh install.sh              # latest release
-#   sh install.sh 2.1.1        # a given version
+#   sh install.sh 2.1.2        # a given version
 #
 # Environment:
 #   REMEDY_INSTALL_DIR   where the runtime goes   (default ~/.local/lib/remedy)
@@ -61,7 +61,7 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 version="${1:-}"
 if [ -z "$version" ]; then
   fetch "${RELEASES}/latest/download/latest.json" "$tmp/latest.json" ||
-    die "could not read the latest release. Give a version: sh install.sh 2.1.1"
+    die "could not read the latest release. Give a version: sh install.sh 2.1.2"
   version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)"
 fi
 version="${version#v}"

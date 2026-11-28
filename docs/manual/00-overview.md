@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **This build** | **v2.1.1** · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **This build** | **v2.1.2** · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · no desktop: `scripts/install.sh` / `scripts/install.ps1` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -32,7 +32,7 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v2.1.1** gives Remedy a face of her own, drawn for you and this install.
+**v2.1.2** gives Remedy a face of her own, drawn for you and this install.
 Grove is one conversation. When a request needs Studio, she starts it in the
 background and leaves a card in Grove. The runtime, the voice and the `remedy`
 command line are all native; nothing Python is installed.

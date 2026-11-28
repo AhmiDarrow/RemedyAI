@@ -3,7 +3,7 @@
 # Remedy itself is not a Python package; install it with the desktop
 # installers or scripts/install.sh / scripts/install.ps1.
 name = "remedy-tooling"
-version = "2.1.1"
+version = "2.1.2"
 description = "Repository tooling for Remedy (not published)."
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"

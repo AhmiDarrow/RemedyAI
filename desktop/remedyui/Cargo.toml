@@ -1,6 +1,6 @@
 [package]
 name = "remedy-desktop"
-version = "2.1.1"
+version = "2.1.2"
 edition = "2024"
 publish = false
 
@@ -36,7 +36,7 @@ codegen-units = 1
 strip = "debuginfo"  # "true" can strip the embedded .ico from the Windows exe
 # Unwind, never abort: the engine contains a failing binding or handler at an
 # error boundary and the window carries on. Abort turned every such failure
-# into the app closing (2.1.1, changing the text size).
+# into the app closing (before 2.1.2, changing the text size).
 panic = "unwind"
 
 # Embed desktop/src-tauri/icons/icon.ico into the Windows exe (tray is the

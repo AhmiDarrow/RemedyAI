@@ -28,7 +28,7 @@
 
 Remedy lives on **this computer**. The Desktop app runs on **Windows x64**, **Linux** (including WSLg), and **macOS** (Apple Silicon and Intel). The CLI also runs on **Windows ARM64** and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. The **phone app** (Android) pairs with your PC and shows the same Remedy. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
 
-**New in 2.1.1:** a face of her own, the same on every screen; **connectors** (MCP servers such as GitHub, added in Settings → Connections → Connectors); a conversation that flows in order with timestamps; faster long chats; and no Python anywhere. [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md).
+**New in 2.1.2:** a face of her own, the same on every screen; **connectors** (MCP servers such as GitHub, added in Settings → Connections → Connectors); a conversation that flows in order with timestamps; faster long chats; and no Python anywhere. [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md).
 
 | | |
 |--|--|

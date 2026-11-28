@@ -6,7 +6,7 @@
 # system-wide and nothing needs administrator rights.
 #
 #   .\install.ps1                  # latest release
-#   .\install.ps1 -Version 2.1.1   # a given version
+#   .\install.ps1 -Version 2.1.2   # a given version
 #   .\install.ps1 -NoPath          # do not add the folder to the user PATH
 param(
     [string]$Version = "",
