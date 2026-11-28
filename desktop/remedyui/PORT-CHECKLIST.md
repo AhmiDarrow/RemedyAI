@@ -6,7 +6,7 @@ Identity and engine pins: RemedyUI `main` at `3142c66cde5e20b06028f955087326dab9
 
 ## Shell (this milestone)
 
-- [x] `cargo remedy` app at `desktop/remedyui`, version 2.1.1, id `com.remedy.desktop`
+- [x] `cargo remedy` app at `desktop/remedyui`, version 2.1.2, id `com.remedy.desktop`
 - [x] Window, Dark Forest default, every shared palette in golden previews
 - [x] Studio session list with always-visible New (+) and Close (×): 32 px hit target, 20 px glyph, high-contrast in all themes, hover and focus from the `icon_button` sheet
 - [x] Close to tray, tray menu, single instance

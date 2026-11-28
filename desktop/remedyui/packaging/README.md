@@ -1,6 +1,6 @@
 # Remedy Desktop packaging
 
-The current RemedyUI build is **2.1.1** (`com.remedy.desktop`), which is newer than the last Tauri build **0.70.5**. These scripts produce the artifacts that feed already understands. They do not tag a release and they do not publish one.
+The current RemedyUI build is **2.1.2** (`com.remedy.desktop`), which is newer than the last Tauri build **0.70.5**. These scripts produce the artifacts that feed already understands. They do not tag a release and they do not publish one.
 
 `cargo remedy package` writes an Inno Setup installer on Windows, a prefix tarball on Linux, and a zipped `.app` on macOS. None of those is the 0.70.5 update payload. Use the scripts in this directory.
 
@@ -24,16 +24,16 @@ The 2.0 client uses the same flags, the same flag file, and the same three hidde
 
 ## Feed
 
-`latest.json` in this directory is the 2.1.1 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 2.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
+`latest.json` in this directory is the 2.1.2 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 2.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
 
 | Platform | Asset | URL |
 | --- | --- | --- |
-| `windows-x86_64` | `Remedy.Desktop_2.1.1_x64-setup.exe` | `.../releases/download/v2.1.1/` |
-| `linux-x86_64` | `Remedy.Desktop_2.1.1_amd64.AppImage` | `.../releases/download/v2.1.1/` |
-| `darwin-aarch64` | `Remedy.Desktop_2.1.1_aarch64.app.tar.gz` | `.../releases/download/runtime-v2.1.1/` |
-| `darwin-x86_64` | `Remedy.Desktop_2.1.1_x64.app.tar.gz` | `.../releases/download/runtime-v2.1.1/` |
+| `windows-x86_64` | `Remedy.Desktop_2.1.2_x64-setup.exe` | `.../releases/download/v2.1.2/` |
+| `linux-x86_64` | `Remedy.Desktop_2.1.2_amd64.AppImage` | `.../releases/download/v2.1.2/` |
+| `darwin-aarch64` | `Remedy.Desktop_2.1.2_aarch64.app.tar.gz` | `.../releases/download/runtime-v2.1.2/` |
+| `darwin-x86_64` | `Remedy.Desktop_2.1.2_x64.app.tar.gz` | `.../releases/download/runtime-v2.1.2/` |
 
-Also produced, not listed in the feed: `Remedy.Desktop_2.1.1_amd64.deb`, `Remedy.Desktop_2.1.1_aarch64.dmg`, `Remedy.Desktop_2.1.1_x64.dmg`. Those are first-install packages. A `.deb` install cannot replace itself. A DMG left under `/Volumes/` is refused; the person moves the app out of the disk image first.
+Also produced, not listed in the feed: `Remedy.Desktop_2.1.2_amd64.deb`, `Remedy.Desktop_2.1.2_aarch64.dmg`, `Remedy.Desktop_2.1.2_x64.dmg`. Those are first-install packages. A `.deb` install cannot replace itself. A DMG left under `/Volumes/` is refused; the person moves the app out of the disk image first.
 
 The public key is the `RW` line embedded in `desktop/remedyui/src/update.rs` (`MINISIGN_PUBKEY_B64`, the same key the Tauri builds had in `desktop/src-tauri/tauri.conf.json`). Do not generate a new key.
 

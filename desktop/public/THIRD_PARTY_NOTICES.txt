@@ -2,7 +2,7 @@
 REMEDY DESKTOP — THIRD-PARTY NOTICES
 ==============================================================================
 
-Remedy Desktop 2.1.1
+Remedy Desktop 2.1.2
 
 Remedy Desktop includes software from the projects listed below. Each is
 used under its own licence; the full text of every licence follows the
@@ -19,7 +19,7 @@ rather than bundled are documented in docs/THIRD_PARTY.md.
 First-party components: these Rust crates are Remedy's own work (the
 Remedy UI engine and the apps built on it) and are covered by Remedy's
 own licence, so they are not attributed below:
-  remedy-connect 2.1.1, remedy-connect-core 0.1.0, remedy-desktop 2.1.1,
+  remedy-connect 2.1.2, remedy-connect-core 0.1.0, remedy-desktop 2.1.2,
   remedy-iroh 0.1.0, remedy-ui 1.1.1, remedy-ui-core 1.1.1, remedy-ui-engine
   1.1.1, remedy-ui-fonts 1.1.1, remedy-ui-fonts-cjk 1.1.1, remedy-ui-media
   1.1.1, remedy-ui-media-playback 1.1.1, remedy-ui-platform 1.1.1,

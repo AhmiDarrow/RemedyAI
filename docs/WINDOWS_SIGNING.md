@@ -22,7 +22,7 @@ replace Authenticode for the **first** download from the browser.
 | Releases only from | `https://github.com/AhmiDarrow/RemedyAI/releases` |
 | Update metadata | `…/releases/latest/download/latest.json` (URL must match publisher) |
 | Installer asset name | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces; never `Remedy_Desktop_`) |
-| Example URL | `…/releases/download/v2.1.1/Remedy.Desktop_2.1.1_x64-setup.exe` |
+| Example URL | `…/releases/download/v2.1.2/Remedy.Desktop_2.1.2_x64-setup.exe` |
 | minisign public key (base64) | `MINISIGN_PUBKEY_B64` in `desktop/remedyui/src/update.rs` (the same key as `desktop/src-tauri/tauri.conf.json`) |
 
 If auto-update reports `Download URL does not match signed latest.json asset`,

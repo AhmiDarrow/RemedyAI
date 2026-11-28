@@ -1365,7 +1365,7 @@ mod binding_panic_tests {
     use remedy_ui::widgets as w;
 
     /// A list built over a signal that was already dropped panics on its first run, before
-    /// its binding is attached to any element. That closed the app (2.1.1, changing the
+    /// its binding is attached to any element. That closed the app (before 2.1.2, changing the
     /// text size). It is logged and stopped instead, and the window keeps working.
     #[test]
     fn a_list_over_a_dropped_signal_does_not_close_the_app() {
