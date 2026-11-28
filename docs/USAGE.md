@@ -188,8 +188,9 @@ Type a command in any conversation: Studio, Grove, the web UI, or Grove on a pai
 | **Model** | |
 | `/model`, `/model <part of a name>` | Show, list, or switch this conversation's model |
 | `/think <level>`, `/effort <level>` | How much she thinks before answering: off, low, medium or high |
-| `/usage [days]`, `/context` | Tokens and estimated cost; how full this conversation is |
-| `/providers`, `/tools [word]`, `/agents`, `/mcp` | What is connected and available |
+| `/usage [days]`, `/context` | Tokens used; how full this conversation is |
+| `/providers`, `/tools [word]`, `/agents` | What is connected and available |
+| `/connectors` (`/mcp`) | Your connectors (MCP servers), their state and tools |
 | **Memory** | |
 | `/remember <text>`, `/forget <text>`, `/memory <words>`, `/whoami` | Save, remove, search, and see what she knows about you |
 | **Her work** | |
@@ -469,7 +470,7 @@ remedy tool search workspace
 
 ### `remedy tool stats`
 
-Show Tool ABI registration counts by runtime (Go / Zig / Python worker).
+Show how often each tool was called.
 
 ```bash
 remedy tool stats
