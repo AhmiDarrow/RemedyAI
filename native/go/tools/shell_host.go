@@ -64,7 +64,10 @@ func describeHostShell() string {
 		return "Windows PowerShell -NoProfile -Command; the command is one argv element, not interpolated through cmd.exe"
 	case hostShellBash:
 		if runtime.GOOS == "windows" {
-			return "Git Bash (bash -c): POSIX commands, and paths written /c/Users/name or \"C:/Users/name\""
+			// The second half is what a session ran into: Git Bash rewrites an
+			// argument that looks like a path list before a Windows program sees it.
+			return "Git Bash (bash -c): POSIX commands, and paths written /c/Users/name or \"C:/Users/name\". " +
+				"It rewrites an argument shaped like a/b:c/d (git's branch/name:path) into a Windows path list; put MSYS_NO_PATHCONV=1 before such a command"
 		}
 		return "bash -lc"
 	case hostShellCmd:

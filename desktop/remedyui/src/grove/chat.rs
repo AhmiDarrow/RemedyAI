@@ -220,7 +220,12 @@ fn message_row(ui: &Ui, grove: &Grove, msg: &StoryMessage) -> El {
     } else {
         grove.partner()
     };
-    bubble(ui, &who, user, move || plain_rich(&text))
+    let row = bubble(ui, &who, user, move || plain_rich(&text));
+    // When it was said, on hover.
+    if let Some(at) = crate::time::parse_rfc3339(&msg.created_at) {
+        w::tooltip(&row, crate::time::clock(ui.local_time_at(at).local_seconds()));
+    }
+    row
 }
 
 fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static) -> El {

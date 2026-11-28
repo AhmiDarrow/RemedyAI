@@ -38,6 +38,10 @@ pub struct WorkStep {
     pub args_text: Option<String>,
     /// Tool output or preview, persisted on the step so the trail can show it.
     pub result_text: Option<String>,
+    /// When the call was made and when its result came back (Unix seconds),
+    /// where known. What she said before the call was said by `at`.
+    pub at: Option<i64>,
+    pub done_at: Option<i64>,
 }
 
 impl WorkStep {
@@ -51,6 +55,8 @@ impl WorkStep {
             detail: None,
             args_text: None,
             result_text: None,
+            at: None,
+            done_at: None,
         }
     }
 
@@ -254,6 +260,7 @@ pub fn on_tool_call(steps: &mut Vec<WorkStep>, breaks: &mut Vec<usize>, partial:
     }
     step.args_text = args_text(&v);
     step.detail = short_args(&v);
+    step.at = Some(crate::time::now_secs());
     steps.push(step);
 }
 
@@ -286,6 +293,10 @@ pub fn on_tool_result(steps: &mut Vec<WorkStep>, data: &str) {
     };
     let result = if output.is_empty() { None } else { Some(output) };
     mark_or_push(steps, &id, &name, status, error, result);
+    let now = crate::time::now_secs();
+    if let Some(step) = steps.iter_mut().rev().find(|s| (!id.is_empty() && s.id == id) || (id.is_empty() && s.name == name)) {
+        step.done_at.get_or_insert(now);
+    }
 }
 
 /// Creates or updates a step from a `step` frame.
@@ -399,6 +410,8 @@ pub fn steps_from_history(calls: &[Value], results: &[Value]) -> Vec<WorkStep> {
             step.args_text = call.args_text;
             step.detail = call.detail;
             step.result_text = res.and_then(|r| r.output.clone());
+            step.at = call.at;
+            step.done_at = res.and_then(|r| r.at);
             step
         })
         .collect()
@@ -668,6 +681,7 @@ struct HistCall {
     narration: Option<String>,
     args_text: Option<String>,
     detail: Option<String>,
+    at: Option<i64>,
 }
 
 struct HistRes {
@@ -675,6 +689,7 @@ struct HistRes {
     id: String,
     error: Option<String>,
     output: Option<String>,
+    at: Option<i64>,
 }
 
 fn read_calls(values: &[Value]) -> Vec<HistCall> {
@@ -692,6 +707,7 @@ fn read_calls(values: &[Value]) -> Vec<HistCall> {
                 narration,
                 args_text: args_text(v),
                 detail: short_args(v),
+                at: v.get("at").and_then(Value::as_i64),
             })
         })
         .collect()
@@ -721,6 +737,7 @@ fn read_results(values: &[Value]) -> Vec<HistRes> {
                 id: first_str(v, &["id", "call_id"]),
                 error: err,
                 output,
+                at: v.get("at").and_then(Value::as_i64),
             })
         })
         .collect()
