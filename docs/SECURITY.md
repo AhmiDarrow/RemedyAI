@@ -84,6 +84,31 @@ Same three values. The default is `safe`. It also applies to routines and backgr
 
 What these two do not cover: whatever is allowed comes back in the reply to the sender. `all` means the sender can ask for anything Remedy can read.
 
+### Connectors: `approval` on each connector
+
+A connector (an MCP server you add in Settings → Connections → Connectors)
+acts as you on an outside service, with whatever its token allows.
+
+| Value | What happens in Auto mode |
+|---|---|
+| `ask` (default) | Each use of that connector's tools waits for you. Approve one **for this session** and the same call stops asking. |
+| `auto` | That connector's tools run like Remedy's own. |
+
+In Ask mode every use waits; in Full mode none does.
+
+What does not depend on the setting:
+
+- A turn that came from outside (a messenger contact, another bot, a hive daughter) cannot use a connector at all.
+- Remedy has no tool that adds a connector, changes one or reads a token. Only you can, in Settings or `config.toml`.
+- The token is in the secret store, never in `config.toml`, and is never shown back.
+- A URL connector must be `https` (plain `http` only to this computer).
+
+What it does not cover:
+
+- A connector is code or a service you chose to trust. A command connector runs on your computer with your account's rights; nothing sandboxes it.
+- What a connector returns is content from outside. It is labelled that way for the model, but a page or an issue body can still contain text written to steer it. This is the same limit as web pages.
+- A connector's own description of a tool ("read only") is the server's word. Remedy treats every connector tool as one that can change things.
+
 ### Largest request to the local API: `api_max_body_mb`
 
 Default `128`. A request that says it is larger is refused with HTTP 413; one that does not say is cut off at the limit. `0` removes the limit.

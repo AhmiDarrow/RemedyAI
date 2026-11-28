@@ -159,6 +159,22 @@ func (r *Registry) Register(descriptor Descriptor, executor Executor) error {
 	return nil
 }
 
+// Unregister removes every version of a tool and reports whether there was
+// one. For tools that come and go while the runtime runs (a connector that
+// is removed or drops its connection); built-in tools are never unregistered.
+func (r *Registry) Unregister(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	found := false
+	for k := range r.tools {
+		if k.id == id {
+			delete(r.tools, k)
+			found = true
+		}
+	}
+	return found
+}
+
 // SetDeadline assigns the per-Execute deadline of a registered tool version.
 // Callers that build a registry (NewDefaultToolRegistry) apply their defaults
 // here after registration so executors keep declaring only what they know.

@@ -29,6 +29,9 @@ type toolGuards struct {
 	Messenger string
 	// Peer is peer_tools: safe | all | none.
 	Peer string
+	// MCPAuto names the connectors the owner let run in Auto without asking
+	// (approval = "auto" on the server). Every other connector asks in Auto.
+	MCPAuto map[string]bool
 }
 
 const (
@@ -56,6 +59,7 @@ func loadToolGuards(cfg ConfigMap) toolGuards {
 		WebFetch:  oneOf(cfgString(cfg, "web_fetch_guard", defaultWebFetchGuard), defaultWebFetchGuard, "payload", "ask", "off"),
 		Messenger: oneOf(cfgString(cfg, "messenger_tools", defaultMessengerTools), defaultMessengerTools, "safe", "all", "none"),
 		Peer:      oneOf(cfgString(cfg, "peer_tools", defaultPeerTools), defaultPeerTools, "safe", "all", "none"),
+		MCPAuto:   mcpAutoServers(cfg),
 	}
 }
 

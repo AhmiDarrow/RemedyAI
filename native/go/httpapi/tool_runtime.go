@@ -369,6 +369,12 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 	if p.HiveRestricted && hiveDeniedTool(call.Name) {
 		return cognition.Deny
 	}
+	// A connector acts as the owner on an outside service. A turn that came
+	// from outside (a messenger contact, another bot) does not get to use one,
+	// not even with a question to the owner.
+	if p.ForceAsk && mcpServerOf(call.Name) != "" {
+		return cognition.Deny
+	}
 	// Peers and other untrusted origins can never change house rules,
 	// even if the owner would otherwise be prompted to approve.
 	if p.ForceAsk && houseRulesMutation(call) {
@@ -408,6 +414,11 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 			return p.decideOwnerMoment(call)
 		}
 		mode := p.approvalMode()
+		// A connector's tool waits for the owner in Auto unless the owner
+		// marked that connector "auto". Full is the owner's word for everything.
+		if server := mcpServerOf(call.Name); server != "" && mode != "full" && !p.Guards.MCPAuto[server] {
+			return p.askUnlessApproved(call)
+		}
 		// Auto waves coding work through, but not a shell command the write
 		// jail cannot read (guards.go). Full is the owner's word for everything.
 		// A delegate is never "routine" in Auto: it hands a whole mission to

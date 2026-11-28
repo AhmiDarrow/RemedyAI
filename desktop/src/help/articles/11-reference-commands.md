@@ -31,6 +31,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/approve` | `id?` · alias `/yes` | Say yes to what Remedy is waiting to do |
 | `/deny` | `id?` · alias `/no` | Say no to what Remedy is waiting to do |
 | `/harness` | | Show this session's context figures |
+| `/connectors` | `/mcp` | List your connectors, their state and tools |
 | `/settings` | `filter?` · alias `/config` | List settings and their values |
 | `/set` | `name value` | Change a setting (names from `/settings`) |
 | `/get` | `name` | Show one setting |
