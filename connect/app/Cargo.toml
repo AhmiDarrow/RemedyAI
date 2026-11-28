@@ -26,4 +26,7 @@ lto = "fat"
 opt-level = "s"
 codegen-units = 1
 strip = true
-panic = "abort"
+# Unwind, never abort: the engine contains a failing binding or handler at an
+# error boundary and the window carries on. Abort turned every such failure
+# into the app closing (2.1.1, changing the text size).
+panic = "unwind"
