@@ -89,7 +89,18 @@ pub fn bind_window(ui: &Ui) {
         let theme = main.theme();
         let sheet = sheet(&theme);
         ui.set_theme(theme, sheet);
+        ui.set_text_rendering(main.text_rendering());
+        ui.set_reduced_motion(main.reduced_motion());
     }
+}
+
+/// Text edges: "system" follows Windows (ClearType's colour edges when it is on, the
+/// crispest on a normal screen); "smooth" is one shade per pixel. Letters always fit
+/// the pixel grid.
+fn text_rendering(id: &str) -> remedy_ui::view::TextRendering {
+    use remedy_ui::view::{TextAntialias, TextRendering};
+    let edges = if id == "smooth" { TextAntialias::Grayscale } else { TextAntialias::System };
+    TextRendering::new(true, edges)
 }
 
 fn mark_painted(ui: &Ui) {
@@ -145,6 +156,11 @@ pub fn load_into(s: Settings) {
     if let Some(v) = logic::table_string(&text, "appearance", "density") {
         if v == "compact" || v == "cozy" {
             s.density.set(v);
+        }
+    }
+    if let Some(v) = logic::table_string(&text, "appearance", "text_edges") {
+        if v == "system" || v == "smooth" {
+            s.text_edges.set(v);
         }
     }
     if let Some(v) = logic::table_string(&text, "appearance", "corners") {
@@ -234,16 +250,22 @@ pub fn apply(s: Settings) {
         theme.colors.accent = accent;
     }
     theme.motion.reduced = s.reduce_motion.get();
+    let text = text_rendering(&s.text_edges.get());
+    let reduced = s.reduce_motion.get();
+    // Every window wears the same look: theme, text edges and motion together.
     EXTRA.with(|e| {
         e.borrow_mut().retain(|window| {
             let Some(other) = window() else { return false };
             mark_painted(&other);
             other.set_theme(theme.clone(), sheet(&theme));
+            other.set_text_rendering(text);
+            other.set_reduced_motion(reduced);
             true
         })
     });
     paint(&ui, theme);
-    ui.set_reduced_motion(s.reduce_motion.get());
+    ui.set_text_rendering(text);
+    ui.set_reduced_motion(reduced);
     if let Some(app) = host() {
         app.set_reduce_motion(s.reduce_motion.get());
     }
@@ -268,6 +290,7 @@ pub fn persist(s: Settings) {
         ("theme", logic::toml_quote(&s.theme_id.get())),
         ("density", logic::toml_quote(&s.density.get())),
         ("corners", logic::toml_quote(&s.corners.get())),
+        ("text_edges", logic::toml_quote(&s.text_edges.get())),
         ("font_scale", logic::toml_quote(&s.font_scale.get())),
         ("reduce_motion", bool_toml(s.reduce_motion.get())),
         ("show_presence", bool_toml(s.show_presence.get())),

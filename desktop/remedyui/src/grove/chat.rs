@@ -117,11 +117,15 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
             let g = body;
             move || {
                 let who = g.partner();
-                let g2 = g.clone();
-                bubble(&ui, &who, false, move || {
-                    let t = g2.partial.get();
-                    RichText::plain(if t.is_empty() { "…".into() } else { t })
-                })
+                let (g_think, g_step, g_text) = (g.clone(), g.clone(), g.clone());
+                her_column(&ui, &who)
+                    .child(crate::chat::thinking_row(&ui, move || g_think.thinking.get(), true))
+                    .child(crate::chat::quiet_line(&ui, "▸ ", move || g_step.process.get().last().cloned().unwrap_or_default()))
+                    .child(w::text(&ui, "").selectable(true).text(move || {
+                        let t = g_text.partial.get();
+                        let quiet = g_text.thinking.get().trim().is_empty() && g_text.process.get().is_empty();
+                        plain_rich(if t.is_empty() && quiet { "…" } else { &t })
+                    }))
             }
         })
         .el()
@@ -220,7 +224,20 @@ fn message_row(ui: &Ui, grove: &Grove, msg: &StoryMessage) -> El {
     } else {
         grove.partner()
     };
-    let row = bubble(ui, &who, user, move || plain_rich(&text));
+    let row = if user {
+        bubble(ui, &who, user, move || plain_rich(&text))
+    } else {
+        let g = grove.clone();
+        let steps = tools_line(&msg.tool_calls);
+        let mut col = her_column(ui, &who);
+        if let Some(line) = steps {
+            col = col.child(crate::chat::quiet_line(ui, "▸ ", move || line.clone()));
+        }
+        if !text.trim().is_empty() {
+            col = col.child(crate::depth::blocks(ui, &text, true, move |src| g.studio.depth.show_image(src)));
+        }
+        col
+    };
     // When it was said, on hover.
     if let Some(at) = crate::time::parse_rfc3339(&msg.created_at) {
         w::tooltip(&row, crate::time::clock(ui.local_time_at(at).local_seconds()));
@@ -246,7 +263,7 @@ fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static)
             start: unit * 3.0,
         })
         .layout(|l| {
-            l.max_width = Length::Px(640.0);
+            l.max_width = Length::Px(crate::tokens::BUBBLE_MAX);
             l.shrink = 1.0;
         })
         .style(surface.foreground(fg))
@@ -262,6 +279,38 @@ fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static)
     } else {
         row.justify(Justify::Start).child(mark).child(body)
     }
+}
+
+/// Her side of the conversation: her name, then what she says, as text (no box), as in Studio.
+fn her_column(ui: &Ui, who: &str) -> El {
+    let unit = ui.theme().spacing.unit;
+    w::column(ui)
+        .gap(unit)
+        .layout(|l| {
+            l.max_width = Length::Px(crate::tokens::BUBBLE_MAX);
+            l.min_width = Length::Px(0.0);
+            l.shrink = 1.0;
+        })
+        .child(w::text(ui, who.to_string()).variant("muted"))
+}
+
+/// The steps a saved reply ran, as one quiet line ("Bash ×3 · Read").
+fn tools_line(calls: &[logic::ToolCall]) -> Option<String> {
+    let mut order: Vec<(String, usize)> = Vec::new();
+    for call in calls {
+        let name = crate::work::short_tool(&call.name);
+        match order.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, c)) => *c += 1,
+            None => order.push((name, 1)),
+        }
+    }
+    (!order.is_empty()).then(|| {
+        order
+            .iter()
+            .map(|(n, c)| if *c > 1 { format!("{n} ×{c}") } else { n.clone() })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    })
 }
 
 fn plain_rich(text: &str) -> RichText {
@@ -296,8 +345,7 @@ fn feed_extras(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         return w::column(ui);
     }
     w::column(ui)
-        .child(todo_block(ui, grove.clone()))
-        .child(process_block(ui, grove))
+        .child(todo_block(ui, grove))
 }
 
 pub(super) fn todo_block(ui: &Ui, grove: Grove) -> El {
@@ -321,26 +369,6 @@ pub(super) fn todo_block(ui: &Ui, grove: Grove) -> El {
                         };
                         w::text(&ui, line)
                     }
-                })
-            }
-        },
-    )
-    .el()
-}
-
-fn process_block(ui: &Ui, grove: Grove) -> El {
-    let g = grove.clone();
-    show(
-        ui,
-        move || g.streaming.get() && !g.process.get().is_empty(),
-        {
-            let ui = ui.clone();
-            let grove = grove.clone();
-            move || {
-                let col = w::column(&ui);
-                w::for_each(&col, grove.process, |s: &String| s.clone(), {
-                    let ui = ui.clone();
-                    move |s| w::text(&ui, s.clone()).variant("muted")
                 })
             }
         },
@@ -422,7 +450,7 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                     .padding(Insets::all(unit * 5.0))
                     .layout(|l| {
                         l.width = Length::Percent(1.0);
-                        l.max_width = Length::Px(640.0);
+                        l.max_width = Length::Px(crate::tokens::BUBBLE_MAX);
                         l.min_width = Length::Px(0.0);
                     })
                     .style(crate::tokens::presence_frame(&colors))

@@ -707,7 +707,7 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
 }
 
 /// A quiet line in her reply: a run of steps, or the thought she is on. Hidden while empty.
-fn quiet_line(ui: &Ui, prefix: &'static str, text: impl Fn() -> String + 'static) -> El {
+pub(crate) fn quiet_line(ui: &Ui, prefix: &'static str, text: impl Fn() -> String + 'static) -> El {
     let colors = ui.theme().colors.clone();
     let text = Rc::new(text);
     let shown = text.clone();
@@ -729,7 +729,7 @@ fn quiet_line(ui: &Ui, prefix: &'static str, text: impl Fn() -> String + 'static
 
 /// Her thinking inside the message: closed it is one line (the thought she is on, or
 /// "Thinking"), open it is all of it. `live` follows the thinking as it streams.
-fn thinking_row(ui: &Ui, thinking: impl Fn() -> String + 'static, live: bool) -> El {
+pub(crate) fn thinking_row(ui: &Ui, thinking: impl Fn() -> String + 'static, live: bool) -> El {
     let colors = ui.theme().colors.clone();
     let open = Signal::new(false);
     let thinking = Rc::new(thinking);

@@ -182,6 +182,8 @@ pub(crate) struct Grove {
     pub decision_busy: Signal<bool>,
     pub messages: Signal<Vec<StoryMessage>>,
     pub partial: Signal<String>,
+    /// Her thinking in the turn that is running.
+    pub thinking: Signal<String>,
     pub streaming: Signal<bool>,
     pub loading: Signal<bool>,
     pub attachments: Signal<Vec<Attachment>>,
@@ -293,6 +295,7 @@ impl Grove {
             decision_busy: Signal::new(false),
             messages: Signal::new(Vec::new()),
             partial: Signal::new(String::new()),
+            thinking: Signal::new(String::new()),
             streaming: Signal::new(false),
             loading: Signal::new(false),
             attachments: Signal::new(Vec::new()),
@@ -785,6 +788,7 @@ impl Grove {
         if !steer {
             self.streaming.set(true);
             self.partial.set(String::new());
+            self.thinking.set(String::new());
             self.process.set(Vec::new());
             self.live_tools.set(Vec::new());
             self.todos.set(Vec::new());
@@ -1780,6 +1784,7 @@ impl Grove {
                         let g = grove.clone();
                         let _ = wake.post(move || {
                             g.partial.set(String::new());
+                            g.thinking.set(String::new());
                             g.process.set(Vec::new());
                             g.live_tools.set(Vec::new());
                             g.todos.set(Vec::new());
@@ -1864,6 +1869,7 @@ impl Grove {
                     self.live_tools.update(|tools| tools.push(call));
                 }
             }
+            "thinking" => self.thinking.update(|buf| crate::work::on_thinking(buf, data)),
             "todos" => self.todos.set(logic::parse_todos(data)),
             "error" => {
                 self.attach_error.set(api::error_text(data));
@@ -1888,6 +1894,7 @@ impl Grove {
             .find(|m| m.role == "assistant" && !m.content.trim().is_empty() && !m.reverted)
             .map(|m| m.content.clone());
         self.partial.set(String::new());
+        self.thinking.set(String::new());
         self.streaming.set(false);
         self.process.set(Vec::new());
         self.live_tools.set(Vec::new());

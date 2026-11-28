@@ -232,6 +232,8 @@ fn theme(ui: &Ui, s: Settings) -> El {
             .child(rows)
             .child(bits::choice(ui, "Density", &[("cozy", "Cozy"), ("compact", "Compact")], s.density))
             .child(bits::choice(ui, "Corners", &[("square", "Square"), ("rounded", "Rounded")], s.corners))
+            .child(bits::choice(ui, "Text edges", &[("system", "System"), ("smooth", "Smooth")], s.text_edges))
+            .child(form::hint(ui, "System uses Windows' ClearType when it is on: the crispest text on most screens. Smooth draws one shade per pixel."))
             .child(drawing(ui))
             .child(bits::choice(
                 ui,

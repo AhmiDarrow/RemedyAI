@@ -104,6 +104,7 @@ fn watch_appearance(s: Settings) {
             s.theme_id.get(),
             s.density.get(),
             s.corners.get(),
+            s.text_edges.get(),
             s.font_scale.get(),
             s.reduce_motion.get(),
             s.show_presence.get(),
