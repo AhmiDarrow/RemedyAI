@@ -42,6 +42,7 @@ var fullSlashCommands = []map[string]any{
 	// the model side
 	{"name": "/usage", "description": "Tokens and estimated cost: /usage [days]", "aliases": []string{"/cost"}, "arguments": "days", "group": "Model"},
 	{"name": "/harness", "description": "This conversation's context figures: fill, compactions, tool and model results", "aliases": []string{}, "arguments": nil, "group": "Model"},
+	{"name": "/connectors", "description": "The connectors you added, whether each is connected, and the tools it gives Remedy", "aliases": []string{"/mcp"}, "arguments": nil, "group": "Model"},
 	{"name": "/context", "description": "How full this conversation's context is", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/providers", "description": "Model providers and which are connected", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/tools", "description": "The tools she can use: /tools [word to filter by]", "aliases": []string{}, "arguments": "filter", "group": "Model"},
@@ -479,6 +480,30 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 			return say("No tool matches “%s”.", arg)
 		}
 		return say("%d tools:\n  %s", len(names), strings.Join(names, ", "))
+
+	case "/connectors", "/mcp":
+		_, out := who.call(http.MethodGet, "/api/mcp/servers", nil)
+		rows, _ := out["servers"].([]any)
+		if len(rows) == 0 {
+			return say("No connectors yet. Add one in Settings, Connectors: a command to run or a URL, and a token if the service needs one.")
+		}
+		lines := []string{"Connectors:"}
+		for _, r := range rows {
+			m, _ := r.(map[string]any)
+			state, _ := m["state"].(string)
+			line := fmt.Sprintf("  %v: %s", m["name"], state)
+			if e, _ := m["error"].(string); e != "" {
+				line += " (" + e + ")"
+			}
+			if list, _ := m["tools"].([]any); len(list) > 0 {
+				line += fmt.Sprintf(", %d tools", len(list))
+			}
+			if m["approval"] == "auto" {
+				line += ", runs without asking in Auto"
+			}
+			lines = append(lines, line)
+		}
+		return say("%s", strings.Join(lines, "\n"))
 
 	case "/harness":
 		h := harnessFor(sessionID)

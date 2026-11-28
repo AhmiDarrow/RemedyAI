@@ -21,6 +21,7 @@ pub fn sections(ui: &Ui, s: Settings) -> El {
         .child(connect(ui, s))
         .child(channels(ui, s))
         .child(assistant(ui, s))
+        .child(super::sec_connectors::connectors(ui, s))
         .child(mcp(ui, s))
 }
 

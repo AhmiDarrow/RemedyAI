@@ -138,6 +138,8 @@ type Server struct {
 	innerAct atomic.Value
 	// mood is the one mood every surface shows (mood.go).
 	mood moodState
+	// mcp holds the owner's connectors (mcp_client.go); nil without a tool registry.
+	mcp *mcpManager
 	// skillTickAt is when the learn clock last ran the learned-skill
 	// lifecycle tick (unix nanoseconds; 0 = never).
 	skillTickAt atomic.Int64
@@ -251,6 +253,10 @@ func New(cfg Config) (*Server, error) {
 		_ = cr.AttachSettingsTools(func() *Server { return s })
 		// Remedy's head tools: children, routines, goals, owner notes.
 		_ = cr.AttachPartnerTools(func() *Server { return s })
+		// The owner's connectors. Each connects in the background; its tools
+		// join the list when it answers.
+		s.mcp = newMCPManager(ResolveHomeDir(home), cr.Registry, cr.syncModelToolSchemas)
+		s.mcp.Start()
 	}
 	if err := s.openEventBus(home); err != nil {
 		_ = store.Close()
@@ -325,6 +331,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExportSession)
 	s.mux.HandleFunc("POST /api/sessions/{id}/steer", s.handleSteerSession)
 	s.mux.HandleFunc("POST /api/presence/typing", s.handlePresenceTyping)
+	s.mux.HandleFunc("GET /api/mcp/servers", s.handleMCPList)
+	s.mux.HandleFunc("POST /api/mcp/servers", s.handleMCPUpsert)
+	s.mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.handleMCPDelete)
+	s.mux.HandleFunc("POST /api/mcp/servers/{name}/reconnect", s.handleMCPReconnect)
 	s.mux.HandleFunc("GET /api/sessions/{id}/todos", s.handleSessionTodos)
 	s.mux.HandleFunc("GET /api/sessions/{id}/timeline", s.handleSessionTimeline)
 	s.mux.HandleFunc("POST /api/sessions/{id}/time-travel", s.handleSessionTimeTravel)
@@ -488,6 +498,7 @@ func (s *Server) Close() error {
 	s.stopConnectGateway()
 	s.claimidx.Stop()
 	s.searchHost.Stop()
+	s.mcp.Stop()
 	if s.hiveMgr != nil {
 		s.hiveMgr.Shutdown()
 		s.hiveMgr = nil

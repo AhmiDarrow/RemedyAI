@@ -57,7 +57,13 @@ memory_db_path = "{MEMDB}"
 # cli, telegram, discord, slack, mattermost, whatsapp, teams, matrix, google_chat, signal, web, api
 enabled_channels = ["cli"]
 
-# MCP *client* server list (advanced). Desktop also exposes Remedy as MCP *host*.
+# Connectors (MCP servers Remedy may use). Add them in Settings, Connectors; a
+# token is kept in the secret store, never here. Each entry is a table:
+#   mcp_servers = [
+#     { name = "github", url = "https://example.com/mcp", approval = "ask" },
+#     { name = "files", command = "npx", args = ["-y", "some-mcp-server"], token_env = "API_TOKEN" },
+#   ]
+# approval: "ask" (her calls wait for you in Auto) or "auto". Full never asks.
 mcp_servers = []
 
 # Learning loop / partner skills
