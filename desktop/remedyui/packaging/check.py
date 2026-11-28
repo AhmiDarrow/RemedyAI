@@ -38,6 +38,8 @@ def text(path: Path) -> str:
 def main() -> int:
     cargo = text(ROOT / "Cargo.toml")
     need('version = "2.1.1"' in cargo, "Cargo.toml version is not 2.1.1")
+    # A release that aborts on panic closes on any failure the engine would contain.
+    need('panic = "abort"' not in cargo, "Cargo.toml: the release profile must unwind, not abort")
 
     feed = json.loads(text(HERE / "latest.json"))
     need(feed.get("version") == "v2.1.1", "latest.json version")
