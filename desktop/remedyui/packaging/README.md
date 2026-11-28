@@ -1,4 +1,4 @@
-# Remedy Desktop 2.0 packaging
+# Remedy Desktop packaging
 
 The current RemedyUI build is **2.1.1** (`com.remedy.desktop`), which is newer than the last Tauri build **0.70.5**. These scripts produce the artifacts that feed already understands. They do not tag a release and they do not publish one.
 
@@ -35,7 +35,7 @@ The 2.0 client uses the same flags, the same flag file, and the same three hidde
 
 Also produced, not listed in the feed: `Remedy.Desktop_2.1.1_amd64.deb`, `Remedy.Desktop_2.1.1_aarch64.dmg`, `Remedy.Desktop_2.1.1_x64.dmg`. Those are first-install packages. A `.deb` install cannot replace itself. A DMG left under `/Volumes/` is refused; the person moves the app out of the disk image first.
 
-The public key is the `RW` line already embedded in `desktop/src-tauri/tauri.conf.json`. Do not generate a new key.
+The public key is the `RW` line embedded in `desktop/remedyui/src/update.rs` (`MINISIGN_PUBKEY_B64`, the same key the Tauri builds had in `desktop/src-tauri/tauri.conf.json`). Do not generate a new key.
 
 ## Windows
 
@@ -82,7 +82,7 @@ An encrypted key is unlocked from the password variable via minisign's stdin. Th
 
 ## CI
 
-`.github/workflows/remedyui-desktop-package.yml` is `workflow_dispatch` only, with `contents: read`. It uploads artifacts. It does not create a tag or a GitHub Release. `desktop-release.yml` stays the Tauri pipeline and is not a 1.0 publisher. The workflow installs NSIS, minisign 0.12, and the Linux link libraries (`libwayland`, `libxkbcommon`). macOS runs on `macos-15` and `macos-15-intel`, the same runners as the Tauri pipeline. `CARGO_BUILD_JOBS` and `RAYON_NUM_THREADS` are 4.
+`.github/workflows/remedyui-desktop-package.yml` is `workflow_dispatch` only, with `contents: read`. It uploads artifacts. It does not create a tag or a GitHub Release. `desktop-release.yml` (on a `v*` tag) runs these same scripts to build and sign the release packages; `scripts/release_local.py` publishes them. The workflow installs NSIS, minisign 0.12, and the Linux link libraries (`libwayland`, `libxkbcommon`). macOS runs on `macos-15` and `macos-15-intel`, the same runners as the Tauri pipeline. `CARGO_BUILD_JOBS` and `RAYON_NUM_THREADS` are 4.
 
 `packaging/check.py` checks the feed, the NSIS flags, the waiter, and that this workflow cannot publish. The three package scripts run it before `cargo build`.
 
