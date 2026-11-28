@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
-	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/core"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
@@ -231,17 +232,67 @@ func mcpDial(c mcpServerConfig, token string) (mcp.Transport, error) {
 		}
 		return &mcp.StreamableClientTransport{Endpoint: c.URL, HTTPClient: client}, nil
 	}
-	path, err := exec.LookPath(c.Command)
+	path, err := tools.LookPath(c.Command)
 	if err != nil {
 		return nil, fmt.Errorf("%q was not found on this computer", c.Command)
 	}
-	cmd := exec.Command(path, c.Args...)
-	cmd.Env = os.Environ()
-	if token != "" && c.TokenEnv != "" {
-		cmd.Env = append(cmd.Env, c.TokenEnv+"="+token)
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return nil, err
 	}
-	hideChildWindow(cmd)
-	return &mcp.CommandTransport{Command: cmd}, nil
+	var env map[string]string
+	if token != "" && c.TokenEnv != "" {
+		env = map[string]string{c.TokenEnv: token}
+	}
+	return mcpSpawn(append([]string{path}, c.Args...), env)
+}
+
+// mcpSpawn starts a command connector the way the runtime starts every child:
+// an authorized, hidden spawn through the native core, in the runtime's job so
+// it cannot outlive it. env is added to the runtime's own environment.
+func mcpSpawn(argv []string, env map[string]string) (mcp.Transport, error) {
+	key, err := secret.EnsureHostSigningKey("")
+	if err != nil {
+		return nil, err
+	}
+	if err := core.EnsureSigningKey(key); err != nil {
+		return nil, err
+	}
+	token, nowMS, err := core.IssueProcessSpawnToken(argv, env, false, false)
+	if err != nil {
+		return nil, err
+	}
+	var proc core.PipedProcess
+	if err := core.WithWriteJail(nil, func() error {
+		var err error
+		proc, err = core.ProcessSpawnPipedAuthorized(argv, "", env, false, token, "", "", false, nowMS)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	stdin, stdout, stderr := proc.Files()
+	go func() { _, _ = io.Copy(io.Discard, stderr); _ = stderr.Close() }()
+	var once sync.Once
+	// The transport closes stdin (its Writer) itself.
+	stop := func() {
+		once.Do(func() {
+			_ = core.ProcessKillTree(proc.PID)
+			_ = stdout.Close()
+			_ = core.ProcessClose(proc.Handle)
+		})
+	}
+	return &mcp.IOTransport{Reader: mcpChildOut{stdout, stop}, Writer: stdin}, nil
+}
+
+// mcpChildOut is the connector's stdout; closing it ends the process too.
+type mcpChildOut struct {
+	io.Reader
+	stop func()
+}
+
+func (o mcpChildOut) Close() error {
+	o.stop()
+	return nil
 }
 
 // Start connects every enabled server in the config, each in the background.
