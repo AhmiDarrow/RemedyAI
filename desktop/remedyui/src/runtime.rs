@@ -314,6 +314,28 @@ pub fn install_panic_hook() {
     });
 }
 
+/// The last stop for a binding that panics. The engine hands such a panic to the nearest
+/// error boundary, then to the window that owns the binding's element; with neither it
+/// unwinds and the app closes. Bindings with no owner chain reach neither: a list's first
+/// run (before its binding is attached to its element), and rows a list builds while it is
+/// being removed (built unowned, over signals that removal already dropped). Those are
+/// logged with where the binding was made, stopped, and the window carries on. Register it
+/// after the main window opens so the window's own handler is asked first.
+pub fn contain_unowned_binding_panics(main: &remedy_ui::Ui) {
+    let weak = main.downgrade();
+    let _ = remedy_ui::reactive::add_panic_handler(move |c| {
+        if weak.upgrade().is_some_and(|ui| ui.element_of_binding(c.node).is_some()) {
+            return false;
+        }
+        let at = c
+            .created_at
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown".into());
+        log_desktop(&format!("CONTAINED a binding panic (made at {at}): {}", c.message));
+        true
+    });
+}
+
 fn panic_payload(info: &std::panic::PanicHookInfo<'_>) -> String {
     if let Some(s) = info.payload().downcast_ref::<&str>() {
         (*s).to_string()
@@ -1301,5 +1323,32 @@ mod delete_path_tests {
     #[test]
     fn encode_path_seg_percent_encodes_reserved() {
         assert_eq!(encode_path_seg("a/b c"), "a%2Fb%20c");
+    }
+}
+
+#[cfg(test)]
+mod binding_panic_tests {
+    use remedy_ui::reactive::{Scope, Signal};
+    use remedy_ui::testing::TestApp;
+    use remedy_ui::widgets as w;
+
+    /// A list built over a signal that was already dropped panics on its first run, before
+    /// its binding is attached to any element. That closed the app (2.1.1, changing the
+    /// text size). It is logged and stopped instead, and the window keeps working.
+    #[test]
+    fn a_list_over_a_dropped_signal_does_not_close_the_app() {
+        let mut app = TestApp::window(|ui, _| {
+            super::contain_unowned_binding_panics(ui);
+            let (gone, scope) = Scope::detached(|| Signal::new(vec![1u32, 2, 3]));
+            scope.dispose();
+            let list = w::column(ui);
+            let _ = w::for_each(&list, gone, |n: &u32| *n, {
+                let ui = ui.clone();
+                move |n| w::text(&ui, format!("row {n}"))
+            });
+            ui.root().child(list).child(w::text(ui, "still here"));
+        });
+        app.frames(2);
+        assert!(app.ui().is_some(), "the window is still open");
     }
 }

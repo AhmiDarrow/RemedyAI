@@ -40,6 +40,7 @@ All notable changes to Remedy are documented here.
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.
 
 ### Fixed
+- Changing the text size (or the theme) could close the app. A list rebuilt for the new look could read a value the rebuild had already dropped, and that failure reached no error boundary. Such a failure is now logged with where it came from and stopped, and the window carries on.
 - An interrupt (Ctrl+Enter) no longer loses the message. It was sent while the old turn was still winding down, the runtime refused it as busy, and the desktop reported it as delivered; the old turn was stopped and nothing answered. The new turn now starts when the old one has ended, a refusal is retried, and a message that still cannot be sent stays queued and says so. The runtime also reads the interrupt reason the desktop sends, so the stopped reply is marked as interrupted.
 - Usage, Harness keeps its figures across a restart of the runtime (they are saved with each session). They read zero until the next turn finished.
 - Usage shows "not priced" where tokens were used and no cost is recorded. Remedy has no price list; "$0.00" read as free.
