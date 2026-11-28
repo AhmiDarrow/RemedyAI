@@ -44,8 +44,10 @@ func (f *fakeOpenAI) handler(t *testing.T) http.HandlerFunc {
 		msgs, _ := body["messages"].([]any)
 		for _, m := range msgs {
 			mm, _ := m.(map[string]any)
-			if mm["role"] == "user" {
-				prompt, _ = mm["content"].(string)
+			// The runtime's own notes ("[Remedy] …") are not the person's words: the
+			// conversation stays keyed on what the person wrote.
+			if text, _ := mm["content"].(string); mm["role"] == "user" && !strings.HasPrefix(text, "[Remedy]") {
+				prompt = text
 			}
 		}
 		f.mu.Lock()

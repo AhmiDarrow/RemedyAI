@@ -1091,11 +1091,13 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
         .layout(|l| l.width = Length::Percent(1.0))
         .child(thought)
         .child(lead)
-        .child(sealed);
+        .child(sealed)
+        .child(live);
+    // Reactions close the message, after everything she has said so far.
     if let Some(bar) = trailing {
         cards = cards.child(bar);
     }
-    let cards = cards.child(live);
+    let cards = cards;
 
     speaker_cluster(
         ui,
