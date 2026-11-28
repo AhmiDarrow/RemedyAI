@@ -698,6 +698,8 @@ func (s *Server) runDetachedStream(
 					narrationMark = len(body)
 				}
 			}
+			// When the call was made: what she said before it was said by now.
+			parsed["at"] = time.Now().Unix()
 			collectedToolCalls = append(collectedToolCalls, parsed)
 			s.moodNote(sid, func(p *moodPhase) { p.tools++; p.steps++; p.thinking = false })
 			name, _ := parsed["name"].(string)
@@ -717,6 +719,7 @@ func (s *Server) runDetachedStream(
 				}
 			})
 			rec := res.record()
+			rec["at"] = time.Now().Unix()
 			collectedToolResults = append(collectedToolResults, rec)
 			draftToolResults = append(draftToolResults, draftToolResult(rec))
 			// Write the ledger before telling anyone: a client that saw the

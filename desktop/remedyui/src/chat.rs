@@ -826,6 +826,14 @@ fn speaker_cluster(
     }
 }
 
+/// Gives a card its time as a hover tip ("3:46 PM"). No time known, no tip.
+fn with_time(ui: &Ui, card: El, at: Option<i64>) -> El {
+    if let Some(at) = at {
+        w::tooltip(&card, time::clock(ui.local_time_at(at).local_seconds()));
+    }
+    card
+}
+
 fn sealed_card(ui: &Ui, studio: Studio, text: &str, animate: bool) -> El {
     let body = depth::blocks(ui, text, true, {
         let st = studio;
@@ -865,15 +873,30 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
         l.width = Length::Percent(1.0);
         l.min_width = Length::Px(0.0);
     });
-    for beat in &beats {
-        cards = cards.child(sealed_card(ui, studio.clone(), beat, false));
+    // Each card carries the time it was said, shown on hover: what she said
+    // before a tool call was said by the time of that call, and the closing
+    // text after the last result came back.
+    let said: Vec<Option<i64>> = msg
+        .steps
+        .iter()
+        .filter(|s| s.narration.as_deref().is_some_and(|n| !n.trim().is_empty()))
+        .map(|s| s.at)
+        .collect();
+    for (i, beat) in beats.iter().enumerate() {
+        let card = sealed_card(ui, studio.clone(), beat, false);
+        cards = cards.child(with_time(ui, card, said.get(i).copied().flatten()));
     }
     if show_body {
         let body = depth::blocks(ui, &msg.content, assistant, {
             let st = studio.clone();
             move |src| st.depth.show_image(src)
         });
-        cards = cards.child(bubble_card(ui, body, user, system));
+        let closing = msg
+            .steps
+            .last()
+            .and_then(|s| s.done_at.or(s.at))
+            .or_else(|| msg.created_at.as_deref().and_then(time::parse_rfc3339));
+        cards = cards.child(with_time(ui, bubble_card(ui, body, user, system), closing));
     }
     let streaming = studio.streaming.get();
     let copy = if streaming {
@@ -952,7 +975,19 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
         &sealed,
         beats,
         |b| format!("{}:{}", b.0, b.1),
-        move |(_i, beat)| sealed_card(&u_beat, st_beat.clone(), &beat, true),
+        move |(i, beat)| {
+            // The i-th thing she said before a call: said by the time of that call.
+            let at = remedy_ui::reactive::untrack(|| {
+                st_beat
+                    .live_steps
+                    .get()
+                    .iter()
+                    .filter(|s| s.narration.as_deref().is_some_and(|n| !n.trim().is_empty()))
+                    .nth(*i)
+                    .and_then(|s| s.at)
+            });
+            with_time(&u_beat, sealed_card(&u_beat, st_beat.clone(), beat, true), at)
+        },
     );
     let react_id = studio
         .live_message_id
