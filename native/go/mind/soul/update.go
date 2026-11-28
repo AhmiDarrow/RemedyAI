@@ -292,7 +292,7 @@ func applyTurn(f *Field, t Turn, ut, at string, now float64) {
 		}
 	}
 	if at != "" && rel.HelpMode == "silent-doer" && utf8.RuneCountInString(at) < 800 {
-		addHabit(f, "Prefer action over narration when they want work done.")
+		addHabit(f, "Do the work they want, and keep them posted in the chat as it goes.")
 	}
 	if rel.CorrectionStyle == "blunt" {
 		addHabit(f, "When corrected, fix fast — no defensive monologue.")

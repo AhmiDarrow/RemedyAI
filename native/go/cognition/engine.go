@@ -175,6 +175,10 @@ type Config struct {
 	MaxRepeatedBatch int
 	// RepeatNudgeBudget allows that many nudges before ErrNoProgress (default 3).
 	RepeatNudgeBudget int
+	// SilentNudgeAfter is how many tool rounds in a row may pass with no text for the
+	// person before a note asks her to say what she is doing (at most silentNudgeMax a
+	// turn). 0 turns it off. Set from the work_updates setting.
+	SilentNudgeAfter int
 	ModelRetries      int
 	RetryBackoff      time.Duration
 	// ContextTrimAt and ContextCompactAt are the shares of the model's window
@@ -480,6 +484,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	repeatNudges := 0
 	lengthContinues := 0
 	rearmCount := 0
+	silentRounds, silentNudges := 0, 0
 	toolCount := 0
 	productiveThisEpoch := 0
 	epoch := 0
@@ -490,7 +495,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		if e.DrainGuidance != nil {
 			for _, guidance := range e.DrainGuidance() {
 				if strings.TrimSpace(guidance) != "" {
-					transcript = append(transcript, UserText("[Owner mid-turn guidance]\n"+guidance))
+					transcript = append(transcript, UserText(steerPreamble+guidance))
 				}
 			}
 		}
@@ -610,7 +615,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				if should {
 					rearmCount++
 					if strings.TrimSpace(nudge) == "" {
-						nudge = "Work is unfinished — call tools now via the function-calling API. Do not narrate; execute."
+						nudge = "Work is unfinished — say in a line what you do next, then call the tools for it."
 					}
 					transcript = append(transcript, contextNote("[Re-arm] "+strings.TrimSpace(nudge)))
 					trace(StateUpdate, iteration, fmt.Sprintf("unfinished re-arm %d", rearmCount))
@@ -745,6 +750,19 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			blocks = append(blocks, resultBlocks(call, modelResults[i]))
 		}
 		transcript = append(transcript, Message{Role: RoleUser, Blocks: blocks})
+		// Rounds of tools with nothing said to the person: after a few, a short note asks
+		// her to say what she is doing. Its own message, after the results, never inside one.
+		if strings.TrimSpace(roundText) == "" {
+			silentRounds++
+		} else {
+			silentRounds = 0
+		}
+		if config.SilentNudgeAfter > 0 && silentRounds >= config.SilentNudgeAfter && silentNudges < silentNudgeMax {
+			silentNudges++
+			silentRounds = 0
+			transcript = append(transcript, contextNote(silentNudge))
+			trace(StateUpdate, iteration, "silent-rounds nudge")
+		}
 		// A batch that actually ran is new evidence, so text-only "done" claims
 		// after it get a fresh re-arm budget. Novelty refusals never get here,
 		// and a deny that executed nothing has no allowed calls.
@@ -1192,3 +1210,16 @@ func canonicalInput(raw []byte) string {
 	}
 	return string(canonical)
 }
+
+// steerPreamble heads a message the person sent while a turn was running. Without
+// the second sentence a question ("eta?") ended the work: she answered and stopped.
+const steerPreamble = "[The person wrote this while you work]\n" +
+	"Answer it in a line or two in your reply if it asks or tells you something, then keep going " +
+	"with the task. Stop or change course only if it says to.\n\n"
+
+// silentNudge is the note after several tool rounds with nothing said to the person.
+const silentNudge = "[Remedy] The person hasn't heard from you in a while: say in a few words " +
+	"what you are doing, then continue."
+
+// silentNudgeMax caps those notes in one turn: more of them reads as noise.
+const silentNudgeMax = 3

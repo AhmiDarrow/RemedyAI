@@ -500,7 +500,6 @@ impl Studio {
             self.streaming.set(false);
             self.clear_live();
             self.depth.todos.set(Vec::new());
-            self.depth.progress.set(None);
             self.depth.remote_busy.set(false);
         }
     }

@@ -242,9 +242,9 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
         .gap(unit)
         .padding(Insets {
             top: unit * 2.0,
-            end: tokens::GUTTER,
-            bottom: tokens::GUTTER,
-            start: tokens::GUTTER,
+            end: tokens::gutter(),
+            bottom: tokens::gutter(),
+            start: tokens::gutter(),
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -519,7 +519,7 @@ fn suggestion_list(
         move || !when.get().is_empty(),
         move || {
             let host = w::column(&u)
-                .gap(2.0)
+                .gap(crate::tokens::space() * 0.5)
                 .layout(|l| l.width = Length::Percent(1.0));
             let rows = offers.clone();
             let st = studio.clone();
@@ -723,7 +723,7 @@ fn queue_list(ui: &Ui, studio: Studio, field: remedy_ui::TextField, editing: Sig
                     .text(move || messages().text(&label, "composer-queue-label"))
             };
             let col = w::column(&u)
-                .gap(2.0)
+                .gap(crate::tokens::space() * 0.5)
                 .layout(|l| l.width = Length::Percent(1.0))
                 .child(head);
             let rows = studio.depth.queue.clone();

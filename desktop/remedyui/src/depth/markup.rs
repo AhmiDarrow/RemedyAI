@@ -592,7 +592,7 @@ fn color_button(ui: &Ui, markup: &Markup, name: &str, hex: &str) -> El {
                 .background(fill)
                 .border(if selected { accent } else { line })
                 .border_width(if selected { 2.0 } else { 1.0 })
-                .radius(4.0)
+                .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
         })
         .layout(|l| {
             l.width = Length::Px(22.0);
@@ -741,7 +741,7 @@ fn stage(
                 .background(well)
                 .border(line)
                 .border_width(1.0)
-                .radius(6.0)
+                .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
                 .padding(Insets::symmetric(unit, unit)),
         )
         .child(
@@ -972,7 +972,7 @@ fn text_label_card(ui: &Ui, markup: &Markup) -> El {
                 .background(depth.raised)
                 .border(line)
                 .border_width(1.0)
-                .radius(8.0)
+                .radius(crate::tokens::corner(crate::tokens::Corner::Medium))
                 .padding(Insets::symmetric(unit * 2.0, unit * 2.0)),
         )
         .child(

@@ -959,7 +959,7 @@ fn task_row(ui: &Ui, model: &AutomationsModel, id: &str) -> El {
                     let m = m.clone();
                     move || m.busy.get().is_some()
                 });
-                w::column(&ui).gap(4.0).child(reassign).child(stop)
+                w::column(&ui).gap(crate::tokens::space() * 1.0).child(reassign).child(stop)
             }
         },
     )
@@ -1003,7 +1003,7 @@ fn task_row(ui: &Ui, model: &AutomationsModel, id: &str) -> El {
                 .child(dot)
                 .child(
                     w::column(ui)
-                        .gap(2.0)
+                        .gap(crate::tokens::space() * 0.5)
                         .layout(|l| {
                             l.grow = 1.0;
                             l.min_width = Length::Px(0.0);
@@ -1083,7 +1083,7 @@ fn assign_editor(ui: &Ui, model: &AutomationsModel, id: &str) -> El {
     );
     w::row(ui)
         .align(Align::Center)
-        .gap(6.0)
+        .gap(crate::tokens::space() * 1.5)
         .child(el.layout(|l| {
             l.grow = 1.0;
             l.min_width = Length::Px(0.0);

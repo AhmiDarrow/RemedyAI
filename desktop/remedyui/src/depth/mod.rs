@@ -16,7 +16,7 @@ pub(crate) mod logic;
 pub(crate) use actions::{
     add_paths, after_finish, apply_frame, approve_plan, ask_delete_skill, ask_remove_project,
     assign_project, background_title, boot, bulk_assign_project, continue_pending, delete_skill, dismiss_library, edit_user_message,
-    export_active, focus_session, focused_steps, import_session, install_library, install_named,
+    export_active, focus_session, import_session, install_library, install_named,
     load_memory, load_more_memory, load_skills, move_project_order, move_session_order, on_session_created, open_skill, pick_attachments,
     apply_picked_project_path, pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
@@ -98,7 +98,6 @@ pub struct StreamJob {
     pub outgoing_files: bool,
     pub held: Vec<Attachment>,
     pub todos: Vec<TodoItem>,
-    pub progress: Option<f32>,
 }
 
 /// The messages built when a conversation opens, and how many more each
@@ -123,7 +122,6 @@ impl StreamJob {
             outgoing_files: false,
             held: Vec::new(),
             todos: Vec::new(),
-            progress: None,
         }
     }
 }
@@ -251,7 +249,6 @@ pub struct Depth {
     pub usage_session: Signal<Usage>,
     pub hide_ticker: Signal<bool>,
     pub todos: Signal<Vec<TodoItem>>,
-    pub progress: Signal<Option<f32>>,
     pub stuck: Signal<bool>,
     pub lightbox: Signal<Option<String>>,
     pub lightbox_gen: Signal<u64>,
@@ -302,7 +299,6 @@ pub struct Depth {
     /// one page or more of that; the rest is fetched when asked for.
     pub library_query: Signal<String>,
     pub library_total: Signal<usize>,
-    pub trace_open: Signal<bool>,
     pub suggest_gen: Signal<u64>,
     /// A composer send waiting for a sidecar session to be created.
     pub held_for_session: Signal<Option<PendingSend>>,
@@ -348,7 +344,6 @@ impl Depth {
             usage_session: Signal::new(Usage::default()),
             hide_ticker: Signal::new(false),
             todos: Signal::new(Vec::new()),
-            progress: Signal::new(None),
             stuck: Signal::new(true),
             lightbox: Signal::new(None),
             lightbox_gen: Signal::new(0),
@@ -389,7 +384,6 @@ impl Depth {
             library_rows: Signal::new(Vec::new()),
             library_query: Signal::new(String::new()),
             library_total: Signal::new(0),
-            trace_open: Signal::new(false),
             suggest_gen: Signal::new(0),
             held_for_session: Signal::new(None),
             held_echo: Signal::new(true),

@@ -728,8 +728,8 @@ fn fold(ui: &Ui, title: impl Into<String>, body: El) -> El {
             Semantics::new(Role::Button).label(format!("{label}, {state}")).action(Action::Click)
         });
     w::column(ui)
-        .gap(tokens::SPACE * 2.0)
-        .padding(remedy_ui::core::Insets::all(tokens::SPACE * 3.0))
+        .gap(tokens::space() * 2.0)
+        .padding(remedy_ui::core::Insets::all(tokens::space() * 3.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);

@@ -537,7 +537,7 @@ fn attach_rail(ui: &Ui, grove: Grove) -> El {
                         let g2 = g.clone();
                         w::row(&ui)
                             .align(Align::Center)
-                            .gap(4.0)
+                            .gap(crate::tokens::space() * 1.0)
                             .child(w::text(&ui, name))
                             .child(w::button(&ui, "Remove", move || {
                                 let list = g2.attachments.get();

@@ -4,7 +4,6 @@
 //! needs a confirm, when the feed follows the floor) can be read on their own.
 
 use crate::studio::{ChatMessage, Filter, Project, Session};
-use crate::work::WorkStep;
 
 pub const MAX_ATTACHMENTS: usize = 12;
 pub const PROMPT_HISTORY_MAX: usize = 80;
@@ -885,18 +884,6 @@ pub fn strip_markdown_for_speech(md: &str) -> String {
     let flat = out.split_whitespace().collect::<Vec<_>>().join(" ");
     flat.chars().take(1400).collect()
 }
-
-/// Trace rows the work strip can open. Tool steps already on the message, named.
-pub fn trace_lines(steps: &[WorkStep]) -> Vec<(String, String)> {
-    steps
-        .iter()
-        .map(|s| {
-            let state = format!("{:?}", s.status).to_lowercase();
-            (s.name.clone(), state)
-        })
-        .collect()
-}
-
 
 /// Path for `POST /api/sessions/{sid}/messages/{msg_id}/edit`.
 pub fn edit_message_path(session_id: &str, msg_id: &str) -> String {

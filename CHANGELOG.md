@@ -4,6 +4,20 @@ All notable changes to Remedy are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Remedy talks with you while she works. Her reply is one flowing message: what she says, a quiet line for each run of steps (and what is running now), and a Thinking line that shows the thought she is on and opens to all of it. She is told to say a line before each batch of tools and what she found after, and that her thinking is not shown in the chat. Several silent rounds in a row get a short nudge (at most three a turn). This works the same for every provider.
+- You & Agent, While she works: Every step (default), Key moments or Only at the end.
+- Communication styles read as kinds of colleague, and every style keeps you posted. New: Warm and Candid. The setup wizard and house rules offer the same six.
+- A message sent while she works is answered in a line and the work goes on, unless it says to stop or change course. One sent as her turn was ending is no longer lost: it goes out next.
+- The actions pane follows the work as it happens. It used to catch up only when the turn ended, and the todo list repeated under each part of a reply.
+- Replies can show tables, lists, headings, quotes and charts (a `chart` block of JSON, bar or line). Links in replies open in Remedy's browser.
+- Every text size, corner, colour and space comes from the theme, so the text size and density settings reach the whole window. Appearance adds Corners (Square or Rounded) and Drawing (Automatic, Graphics card or Processor).
+- A checklist step reads as progress ("1 of 3 done · now: …") instead of its raw data.
+
+### Removed
+- The progress bar and Trace strip under the chat. The steps show in the reply and in the actions pane.
+- The fade-in on finished parts of a reply, which moved and softened the text for a moment.
+
 ## [2.1.2] - 2026-11-28
 
 ### Added

@@ -341,7 +341,7 @@ fn rail(ui: &Ui, tt: &TimeTravel, studio: &Studio) -> El {
             .background(colors.panel)
             .foreground(colors.text)
             .border_side(BorderEdge::Start, BorderSide::new(1.0, line))
-            .shadow(Shadow::new(-8.0, 0.0, 24.0, Color::BLACK.with_alpha(0.22))),
+            .shadow(Shadow::new(-8.0, 0.0, 24.0, crate::tokens::depth().shadow.with_alpha(0.22))),
     );
     let sized = frame.clone();
     let u = ui.clone();
@@ -407,7 +407,7 @@ fn header(ui: &Ui, tt: &TimeTravel) -> El {
                 .variant("strong")
                 .style(
                     StylePatch::new()
-                        .text_size(12.0)
+                        .text_size(crate::tokens::size(crate::tokens::META))
                         .weight(600.0)
                         .letter_spacing(LetterSpacing::Px(-0.2)),
                 ),
@@ -433,7 +433,7 @@ fn intro(ui: &Ui) -> El {
     .style(
         StylePatch::new()
             .foreground(muted)
-            .text_size(12.0)
+            .text_size(crate::tokens::size(crate::tokens::META))
             .line_height(remedy_ui::style::LineHeight::Relative(1.35)),
     )
     .padding(Insets {
@@ -454,7 +454,7 @@ fn error_line(ui: &Ui, tt: &TimeTravel) -> El {
         let unit = u.theme().spacing.unit;
         let tt = tt_text.clone();
         w::text(&u, move || tt.error.get().unwrap_or_default())
-            .style(StylePatch::new().foreground(danger).text_size(13.0))
+            .style(StylePatch::new().foreground(danger).text_size(crate::tokens::size(crate::tokens::LABEL)))
             .padding(Insets {
                 top: 0.0,
                 end: unit * 3.0,
@@ -520,7 +520,7 @@ fn loading(ui: &Ui) -> El {
     let unit = ui.theme().spacing.unit;
     w::text(ui, "Loading…")
         .variant("muted")
-        .style(StylePatch::new().text_size(12.0))
+        .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::META)))
         .padding(Insets {
             top: unit,
             end: unit * 3.0,
@@ -719,7 +719,7 @@ fn step_card(ui: &Ui, tt: &TimeTravel, message_id: String) -> El {
     let card_el = ui
         .el("timetravel-step")
         .column()
-        .gap(2.0)
+        .gap(crate::tokens::space() * 0.5)
         .padding(Insets::all(unit * 2.0))
         .layout(|layout| l_width(layout))
         .disabled({
@@ -789,7 +789,7 @@ fn step_title(
             .style(
                 StylePatch::new()
                     .foreground(accent)
-                    .text_size(13.0)
+                    .text_size(crate::tokens::size(crate::tokens::LABEL))
                     .weight(600.0),
             ),
         )
@@ -815,7 +815,7 @@ fn step_title(
                         .style(
                             StylePatch::new()
                                 .foreground(muted)
-                                .text_size(13.0)
+                                .text_size(crate::tokens::size(crate::tokens::LABEL))
                                 .weight(400.0),
                         )
                     }
@@ -832,7 +832,7 @@ fn step_preview(ui: &Ui, message_id: &str, steps: &Signal<Vec<Step>>, text: Colo
         user_field(&steps.get(), &id, |step| step.preview.clone()).unwrap_or_default()
     })
     .max_lines(3)
-    .style(StylePatch::new().foreground(text).text_size(13.0))
+    .style(StylePatch::new().foreground(text).text_size(crate::tokens::size(crate::tokens::LABEL)))
     .layout(|layout| l_width(layout))
 }
 
@@ -852,7 +852,7 @@ fn step_arrow(ui: &Ui, tt: &TimeTravel, message_id: &str, muted: Color) -> El {
                 api::assistant_line(&steps_text.get(), &id_text).unwrap_or_default()
             })
             .max_lines(2)
-            .style(StylePatch::new().foreground(muted).text_size(12.0))
+            .style(StylePatch::new().foreground(muted).text_size(crate::tokens::size(crate::tokens::META)))
             .layout(|layout| l_width(layout))
         },
     )
@@ -885,7 +885,7 @@ fn confirm_box(ui: &Ui, tt: &TimeTravel, studio: &Studio, message_id: String) ->
                         .unwrap_or_else(|| "this step".into());
                     confirm_copy(&label)
                 })
-                .style(StylePatch::new().foreground(secondary).text_size(12.0))
+                .style(StylePatch::new().foreground(secondary).text_size(crate::tokens::size(crate::tokens::META)))
                 .layout(|layout| l_width(layout)),
         )
         .child(confirm_actions(ui, tt, studio, message_id))
@@ -944,7 +944,7 @@ fn confirm_actions(ui: &Ui, tt: &TimeTravel, studio: &Studio, message_id: String
             .radius(radius)
             .border(accent)
             .border_width(1.0)
-            .text_size(13.0)
+            .text_size(crate::tokens::size(crate::tokens::LABEL))
             .weight(600.0),
     );
     let tt_cancel = tt.clone();
@@ -961,7 +961,7 @@ fn confirm_actions(ui: &Ui, tt: &TimeTravel, studio: &Studio, message_id: String
                 .border(line)
                 .border_width(1.0)
                 .radius(radius)
-                .text_size(13.0),
+                .text_size(crate::tokens::size(crate::tokens::LABEL)),
         );
     w::row(ui)
         .gap(ui.theme().spacing.unit)
@@ -1005,7 +1005,7 @@ fn footer(ui: &Ui, tt: &TimeTravel, studio: &Studio) -> El {
                     .border(line)
                     .border_width(1.0)
                     .radius(radius)
-                    .text_size(12.0),
+                    .text_size(crate::tokens::size(crate::tokens::META)),
             ),
         )
 }
@@ -1038,7 +1038,7 @@ fn empty(ui: &Ui, title: &str, hint: &str) -> El {
         .child(
             w::text(ui, "·")
                 .variant("muted")
-                .style(StylePatch::new().foreground(colors.muted).text_size(16.0)),
+                .style(StylePatch::new().foreground(colors.muted).text_size(crate::tokens::size(crate::tokens::TITLE))),
         );
     w::column(ui)
         .align(Align::Center)
@@ -1056,13 +1056,13 @@ fn empty(ui: &Ui, title: &str, hint: &str) -> El {
             w::text(ui, title)
                 .variant("strong")
                 .text_align(TextAlign::Center)
-                .style(StylePatch::new().text_size(13.0).weight(600.0)),
+                .style(StylePatch::new().text_size(crate::tokens::size(crate::tokens::LABEL)).weight(600.0)),
         )
         .child(
             w::text(ui, hint)
                 .variant("muted")
                 .text_align(TextAlign::Center)
-                .style(StylePatch::new().foreground(colors.muted).text_size(12.0))
+                .style(StylePatch::new().foreground(colors.muted).text_size(crate::tokens::size(crate::tokens::META)))
                 .layout(|layout| layout.max_width = Length::Px(288.0)),
         )
 }

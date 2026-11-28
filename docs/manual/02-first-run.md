@@ -68,7 +68,7 @@ Optional default **project folder** — working directory for tools, shell, and 
 ### 4. Persona & name
 
 - **Your name** — what Remedy calls you (also in Settings later)  
-- **Communication style** — Balanced, Efficient, Detailed, Playful  
+- **Communication style** — Balanced, Warm, Candid, Efficient, Detailed, Playful  
 
 ### 5. On this PC
 

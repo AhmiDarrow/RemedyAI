@@ -44,10 +44,10 @@ pub struct Section {
 }
 
 pub const SECTIONS: &[Section] = &[
-    Section { id: "you-agent", title: "You & Agent", summary: "Names, language & persona", keywords: "user name agent persona identity whoami soul language locale i18n", category: "general", advanced_only: false, display_title: None, display_summary: None },
+    Section { id: "you-agent", title: "You & Agent", summary: "Names, language & persona", keywords: "user name agent persona identity whoami soul language locale i18n updates narrate talk while working chatty quiet", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "voice", title: "Voice", summary: "Speak and hear", keywords: "voice speak hear mic kokoro whisper tts stt aloud quiet grove speech hq high-quality clone human robot", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "workspace", title: "Project workspace", summary: "Folder for tools", keywords: "project path folder directory cwd browser home homepage github url", category: "general", advanced_only: false, display_title: None, display_summary: None },
-    Section { id: "theme", title: "Appearance", summary: "Theme, text size, motion", keywords: "theme density accent dark light color appearance font size text large accessibility contrast motion reduce a11y presence face grove", category: "general", advanced_only: false, display_title: None, display_summary: None },
+    Section { id: "theme", title: "Appearance", summary: "Theme, text size, corners, motion", keywords: "theme corners rounded square radius density accent dark light color appearance font size text large accessibility contrast motion reduce a11y presence face grove", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "provider", title: "Provider", summary: "Model & API key", keywords: "llm openai anthropic xai ollama key model sleev gateway compression tokens", category: "models", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "provider-catalog", title: "Provider catalog", summary: "Which providers appear", keywords: "enable disable models budget skills catalog", category: "models", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "rmb", title: "RMB", summary: "Local agent · coding + tools", keywords: "rmb remedy muscle bridge local agent llama coding tools gguf qwen coder offline private huggingface hugging face pull download", category: "models", advanced_only: false, display_title: Some("Local models"), display_summary: Some("Run a model on this computer") },
@@ -662,6 +662,7 @@ pub struct SaveDraft {
     pub default_workspace: String,
     pub browser_home_url: String,
     pub persona: String,
+    pub work_updates: String,
     pub user_name: String,
     pub name: String,
     pub agent_gender: String,
@@ -720,6 +721,7 @@ impl Default for SaveDraft {
             default_workspace: String::new(),
             browser_home_url: String::new(),
             persona: "balanced".into(),
+            work_updates: "steps".into(),
             user_name: String::new(),
             name: "Remedy".into(),
             agent_gender: "female".into(),
@@ -864,6 +866,7 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     };
     body.insert("browser_home_url".into(), json!(home));
     body.insert("persona".into(), json!(d.persona));
+    body.insert("work_updates".into(), json!(d.work_updates));
     body.insert("user_name".into(), json!(d.user_name.trim()));
     let name = {
         let t = d.name.trim();

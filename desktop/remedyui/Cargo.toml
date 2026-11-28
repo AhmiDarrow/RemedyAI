@@ -12,7 +12,7 @@ publish = false
 # `net`, `image`, `desktop`, and `term` stay for the shell, rails, Grove, and
 # Settings. `extra` is the Connect pairing QR. `webstorage` imports the old webview theme. `customize` is for theme packs. Same features on Windows and Linux.
 # No path override. No script-lua and no rhai: 1.0 core stays plain RemedyUI Rust.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f57d52f53a8a165f61e2be50a8f857c287c44d82", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f57d52f53a8a165f61e2be50a8f857c287c44d82", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize", "rich"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,7 +27,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f57d52f53a8a165f61e2be50a8f857c287c44d82", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f57d52f53a8a165f61e2be50a8f857c287c44d82", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize", "rich"] }
 
 [profile.release]
 lto = "fat"

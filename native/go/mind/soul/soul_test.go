@@ -21,7 +21,7 @@ const pythonField = `{
   "identity_name": "Remedy",
   "identity_gender": "female",
   "identity_vow": "I stay.",
-  "self_habits": ["Prefer action over narration when they want work done."],
+  "self_habits": ["Do the work they want, and keep them posted in the chat as it goes."],
   "relational": {"rapport": 0.61, "trust": 0.58, "correction_style": "blunt", "voice_markers": ["ship it"],
     "speech_register": "casual", "help_mode": "pair", "open_threads": ["check in about the garden tomorrow"],
     "tensions": [], "turns_together": 7, "last_user_ts": 1749990000.0, "last_valence": 0.3,

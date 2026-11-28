@@ -310,9 +310,9 @@ fn pane_kicker(ui: &Ui, kicker: &'static str, sub: &'static str) -> El {
         .align(Align::Center)
         .padding(Insets {
             top: 8.0,
-            end: tokens::GUTTER,
+            end: tokens::gutter(),
             bottom: 8.0,
-            start: tokens::GUTTER,
+            start: tokens::gutter(),
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -324,7 +324,7 @@ fn pane_kicker(ui: &Ui, kicker: &'static str, sub: &'static str) -> El {
         ))
         .child(
             w::column(ui)
-                .gap(1.0)
+                .gap(crate::tokens::space() * 0.25)
                 .layout(|l| {
                     l.grow = 1.0;
                     l.shrink = 1.0;

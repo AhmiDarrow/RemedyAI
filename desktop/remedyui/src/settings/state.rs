@@ -109,6 +109,7 @@ pub struct Settings {
     pub ui_language: Signal<String>,
     pub ui_languages: Signal<Vec<(String, String)>>,
     pub persona: Signal<String>,
+    pub work_updates: Signal<String>,
     pub soul_field: Signal<bool>,
 
     pub provider: Signal<String>,
@@ -196,6 +197,7 @@ pub struct Settings {
 
     pub theme_id: Signal<String>,
     pub density: Signal<String>,
+    pub corners: Signal<String>,
     pub font_scale: Signal<String>,
     pub reduce_motion: Signal<bool>,
     pub show_presence: Signal<bool>,
@@ -256,6 +258,7 @@ impl Settings {
             ui_language: Signal::new("auto".into()),
             ui_languages: Signal::new(vec![("auto".into(), "Auto".into())]),
             persona: Signal::new("balanced".into()),
+            work_updates: Signal::new("steps".into()),
             soul_field: Signal::new(true),
             provider: Signal::new("demo".into()),
             model: Signal::new(String::new()),
@@ -331,6 +334,7 @@ impl Settings {
             model_settings: Signal::new(json!({})),
             theme_id: Signal::new("forest".into()),
             density: Signal::new("cozy".into()),
+            corners: Signal::new("square".into()),
             font_scale: Signal::new("md".into()),
             reduce_motion: Signal::new(false),
             show_presence: Signal::new(true),
@@ -505,6 +509,7 @@ impl Settings {
             self.ui_languages.set(rows);
         }
         self.persona.set(jstr(v, "persona", "balanced"));
+        self.work_updates.set(jstr(v, "work_updates", "steps"));
         self.soul_field.set(jbool(v, "soul_field_enabled", true));
         let provider = jstr(v, "llm_provider", "demo");
         let model = jstr(v, "llm_model", "");
@@ -869,6 +874,7 @@ impl Settings {
         d.default_workspace = self.default_workspace.get();
         d.browser_home_url = self.browser_home.get();
         d.persona = self.persona.get();
+        d.work_updates = self.work_updates.get();
         d.user_name = self.user_name.get();
         d.name = self.agent_name.get();
         d.agent_gender = self.agent_gender.get();

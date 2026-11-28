@@ -13,7 +13,7 @@ use super::{
 use crate::runtime::{self, Client};
 use crate::sse;
 use crate::studio::{ChatMessage, Studio, WorkMode};
-use crate::work::{self, WorkStep};
+use crate::work;
 use remedy_ui::host::FileDialog;
 use remedy_ui::net::{Multipart, Request};
 use remedy_ui::playback::{
@@ -177,13 +177,50 @@ fn steer(studio: &Studio, sid: &str, text: &str) {
     // writing. It shows under that reply and joins the list where she takes
     // it in (the "steered" frame) or when the turn ends.
     studio.depth.steers.update(|v| v.push((sid.to_string(), text.to_string())));
-    studio.depth.notice.set("Sent to the live turn.".into());
+    // She reads it when her current step returns (a long build finishes first).
+    studio.depth.notice.set("Sent. She reads it as soon as her current step is done.".into());
     let Some(client) = studio.runtime() else {
+        return;
+    };
+    let Ok(wake) = waker() else {
         return;
     };
     let path = format!("sessions/{sid}/steer");
     let body = json!({ "message": text });
-    api::spawn_json(&client, Request::post(&path).json(&body), |_| {});
+    let (st, sid, text) = (studio.clone(), sid.to_string(), text.to_string());
+    api::spawn_json(&client, Request::post(&path).json(&body), move |out| {
+        let _ = wake.post(move || steer_answered(&st, &sid, text, out));
+    });
+}
+
+/// What the runtime said to a steer. Refused means the turn ended before it could take it
+/// in: the message was not lost, it is sent as the next message instead.
+fn steer_answered(studio: &Studio, sid: &str, text: String, out: Result<Value, String>) {
+    let reply = match out {
+        Ok(v) => v,
+        Err(e) => {
+            studio.depth.notice.set(format!("Your message did not reach her: {e}"));
+            return;
+        }
+    };
+    if reply.get("steered").and_then(Value::as_bool) == Some(true) {
+        return;
+    }
+    let mut found = false;
+    studio.depth.steers.update(|v| {
+        if let Some(i) = v.iter().position(|(s, t)| s == sid && *t == text) {
+            v.remove(i);
+            found = true;
+        }
+    });
+    if studio.streaming.get() {
+        studio.depth.push_queued(text, "after", Vec::new());
+        studio.depth.notice.set("Her turn was ending. Your message goes next.".into());
+    } else {
+        // Not found: the turn's end already put it in the conversation. Send it without
+        // showing it twice.
+        begin_turn_with(studio, sid, text, Vec::new(), found);
+    }
 }
 
 fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachment>) {
@@ -690,22 +727,6 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                 }
             }
         }
-        "progress" => {
-            if let Ok(v) = serde_json::from_str::<Value>(data) {
-                let raw = v
-                    .get("percent")
-                    .or_else(|| v.get("value"))
-                    .or_else(|| v.get("progress"))
-                    .and_then(|n| n.as_f64())
-                    .unwrap_or(0.0) as f32;
-                let p = if raw > 1.0 { raw / 100.0 } else { raw };
-                let p = p.clamp(0.0, 1.0);
-                studio.depth.map_job(sid, |job| job.progress = Some(p));
-                if active {
-                    studio.depth.progress.set(Some(p));
-                }
-            }
-        }
         "library_suggest" => {
             if active {
                 if let Ok(v) = serde_json::from_str::<Value>(data) {
@@ -852,9 +873,7 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
         "done" | "end" | "aborted" => {
             let status = if kind == "aborted" { "aborted" } else { "done" };
             studio.depth.finish_job(sid, status);
-            studio.depth.map_job(sid, |job| job.progress = None);
             if active {
-                studio.depth.progress.set(None);
                 studio.depth.remote_busy.set(false);
                 studio.finish_assistant(None);
             }
@@ -958,7 +977,6 @@ pub fn focus_session(studio: &Studio, id: &str) {
             });
             studio.streaming.set(true);
             studio.depth.todos.set(job.todos);
-            studio.depth.progress.set(job.progress);
             studio.depth.remote_busy.set(false);
             return;
         }
@@ -966,7 +984,6 @@ pub fn focus_session(studio: &Studio, id: &str) {
     studio.clear_live();
     studio.streaming.set(false);
     studio.depth.todos.set(Vec::new());
-    studio.depth.progress.set(None);
     reattach(studio, id);
 }
 
@@ -3329,14 +3346,6 @@ pub fn background_title(studio: &Studio) -> Option<String> {
     Some(title)
 }
 
-/// Steps copied out so the trace can render without holding the job.
-pub fn focused_steps(studio: &Studio) -> Vec<WorkStep> {
-    if studio.streaming.get() {
-        return studio.live_steps.get();
-    }
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3529,6 +3538,33 @@ mod tests {
             ]
         );
         assert!(studio.depth.steers.get().is_empty());
+    }
+
+    /// The turn ended before the runtime could take the steer in. The message is not lost:
+    /// it goes out as the next message, shown once.
+    #[test]
+    fn a_steer_the_turn_ended_before_is_sent_next() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        let refused = || Ok(json!({ "steered": false, "reason": "no_turn" }));
+        // Still winding down here: it waits in the queue.
+        studio.streaming.set(true);
+        studio.depth.steers.update(|v| v.push(("s1".into(), "and the docs".into())));
+        steer_answered(&studio, "s1", "and the docs".into(), refused());
+        assert!(studio.depth.steers.get().is_empty());
+        assert_eq!(studio.depth.queue.get().len(), 1);
+        assert_eq!(studio.depth.queue.get()[0].text, "and the docs");
+        // Already ended and landed in the conversation: sent, not shown a second time.
+        studio.streaming.set(false);
+        studio.depth.queue.set(Vec::new());
+        push_user(&studio, "s1", "one more");
+        steer_answered(&studio, "s1", "one more".into(), refused());
+        let users = studio.messages.get().iter().filter(|m| m.role == "user").count();
+        assert_eq!(users, 1, "shown once");
+        // A taken steer changes nothing; a failed request says so.
+        steer_answered(&studio, "s1", "x".into(), Ok(json!({ "steered": true })));
+        steer_answered(&studio, "s1", "x".into(), Err("connection refused".into()));
+        assert!(studio.depth.notice.get().contains("did not reach her"));
     }
 
     #[test]

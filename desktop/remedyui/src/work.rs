@@ -550,6 +550,9 @@ fn summary_from_args(args: &Value) -> Option<String> {
         return Some(one_line(s, 160));
     }
     let obj = args.as_object()?;
+    if let Some(list) = obj.get("todos").and_then(Value::as_array) {
+        return Some(checklist_line(list));
+    }
     const PATH_KEYS: &[&str] = &["path", "file", "filepath", "file_path", "directory", "dir"];
     const CMD_KEYS: &[&str] = &["command", "cmd", "shell", "code"];
     const QUERY_KEYS: &[&str] = &[
@@ -585,14 +588,32 @@ fn stringish(v: Option<&Value>) -> Option<String> {
     argv_line(Some(v))
 }
 
+/// A checklist update, said the way a person would: how far along, and what is next.
+fn checklist_line(items: &[Value]) -> String {
+    let text = |t: &Value| ["content", "text", "title"].iter().find_map(|k| stringish(t.get(*k)));
+    let status = |t: &Value| t.get("status").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    let done = items.iter().filter(|t| matches!(status(t).as_str(), "done" | "completed" | "complete")).count();
+    let mut line = format!("{done} of {} done", items.len());
+    if let Some(now) = items
+        .iter()
+        .find(|t| matches!(status(t).as_str(), "in_progress" | "doing" | "active"))
+        .and_then(text)
+    {
+        line.push_str(&format!(" · now: {now}"));
+    }
+    one_line(&line, 160)
+}
+
 fn argv_line(v: Option<&Value>) -> Option<String> {
     let arr = v?.as_array()?;
+    // Words and numbers only: a list of objects is not a command line.
     let parts: Vec<String> = arr
         .iter()
-        .filter_map(|x| {
-            x.as_str()
-                .map(str::to_string)
-                .or_else(|| (!x.is_null()).then(|| x.to_string()))
+        .filter_map(|x| match x {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            _ => None,
         })
         .collect();
     if parts.is_empty() {
@@ -836,9 +857,109 @@ fn collapse_blank(s: &str) -> String {
     out
 }
 
+/// A tool's name as people read it: `web.fetch` is "Fetch", `read_file` is "Read file".
+pub fn short_tool(name: &str) -> String {
+    let trimmed = name.rsplit([':', '/', '.']).next().unwrap_or(name);
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str().replace('_', " ").as_str(),
+        None => trimmed.to_string(),
+    }
+}
+
+/// Her reply in the order it happened: what she said before a run of steps, and the steps.
+/// A run starts at a step she narrated; steps before her first words have no words.
+pub fn flow(steps: &[WorkStep]) -> Vec<(Option<String>, Vec<WorkStep>)> {
+    let mut out: Vec<(Option<String>, Vec<WorkStep>)> = Vec::new();
+    for step in steps {
+        let said = step.narration.as_deref().map(str::trim).filter(|n| !n.is_empty());
+        match (said, out.last_mut()) {
+            (Some(n), _) => out.push((Some(n.to_string()), vec![step.clone()])),
+            (None, Some(last)) => last.1.push(step.clone()),
+            (None, None) => out.push((None, vec![step.clone()])),
+        }
+    }
+    out
+}
+
+/// One quiet line for a run of her steps, as the chat shows it between what she says:
+/// what is running now, or what she ran ("Bash ×3 · Read · 1 failed").
+pub fn steps_line(steps: &[WorkStep]) -> Option<String> {
+    if steps.is_empty() {
+        return None;
+    }
+    if let Some(now) = steps.iter().rev().find(|s| s.status == StepStatus::Running) {
+        let what = step_inline_summary(&now.name, now.args_text.as_deref(), None, None).unwrap_or_default();
+        return Some(if what.is_empty() {
+            format!("Running {}…", short_tool(&now.name))
+        } else {
+            one_line(&format!("Running {}: {what}", short_tool(&now.name)), 140)
+        });
+    }
+    let mut order: Vec<(String, usize)> = Vec::new();
+    for step in steps {
+        let name = short_tool(&step.name);
+        match order.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, count)) => *count += 1,
+            None => order.push((name, 1)),
+        }
+    }
+    let mut line = order
+        .iter()
+        .map(|(n, c)| if *c > 1 { format!("{n} ×{c}") } else { n.clone() })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let failed = steps.iter().filter(|s| s.status == StepStatus::Error).count();
+    if failed > 0 {
+        line.push_str(&format!(" · {failed} failed"));
+    }
+    Some(line)
+}
+
+/// The thought she is on: the last paragraph of her thinking, on one line.
+pub fn latest_thought(thinking: &str) -> Option<String> {
+    let last = thinking.trim().rsplit("\n\n").map(str::trim).find(|p| !p.is_empty())?;
+    Some(one_line(last, 220))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Her reply reads in order: words, then the steps they led to.
+    #[test]
+    fn a_reply_flows_words_then_steps() {
+        let mut a = WorkStep::done("1", "bash");
+        a.narration = Some("Building it first.".into());
+        let b = WorkStep::done("2", "bash");
+        let mut c = WorkStep::failed("3", "read_file", "missing");
+        c.narration = Some("Now the config.".into());
+        let lead = WorkStep::done("0", "grep");
+        let flowed = flow(&[lead, a, b, c]);
+        let shape: Vec<(Option<&str>, usize)> = flowed.iter().map(|(w, s)| (w.as_deref(), s.len())).collect();
+        assert_eq!(shape, vec![(None, 1), (Some("Building it first."), 2), (Some("Now the config."), 1)]);
+        assert_eq!(steps_line(&flowed[1].1).as_deref(), Some("Bash ×2"));
+        assert_eq!(steps_line(&flowed[2].1).as_deref(), Some("Read file · 1 failed"));
+        let mut running = WorkStep::done("4", "bash");
+        running.status = StepStatus::Running;
+        running.args_text = Some(r#"{"command":"cargo build"}"#.into());
+        assert_eq!(steps_line(&[running]).as_deref(), Some("Running Bash: cargo build"));
+        assert_eq!(latest_thought("First idea.\n\nChecking the frame size now.").as_deref(), Some("Checking the frame size now."));
+    }
+
+    /// A checklist update reads as progress, never as the raw list.
+    #[test]
+    fn a_checklist_step_says_how_far_along() {
+        let args = r#"{"todos":[{"id":"b1","status":"completed","text":"Fix the stack test"},
+            {"id":"m4","status":"in_progress","text":"Merge PR #4"},{"id":"x","status":"pending","text":"Ship"}]}"#;
+        assert_eq!(
+            step_inline_summary("todo", Some(args), None, None).as_deref(),
+            Some("1 of 3 done · now: Merge PR #4")
+        );
+        let objects = r#"{"items":[{"a":1},{"b":2}]}"#;
+        let line = step_inline_summary("x", Some(objects), None, None).unwrap_or_default();
+        assert!(!line.contains("\"a\""), "objects are not printed as JSON: {line}");
+    }
 
     #[test]
     fn short_args_reads_command() {

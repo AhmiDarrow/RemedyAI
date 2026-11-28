@@ -30,6 +30,33 @@ pub struct DesktopPrefs {
     /// empty for the machine's default.
     #[serde(default)]
     pub terminal_shell: String,
+    /// What draws the windows: "auto" (the CPU, moving to the graphics card when frames
+    /// get slow), "gpu" or "cpu". Read at start.
+    #[serde(default = "auto_renderer")]
+    pub renderer: String,
+}
+
+fn auto_renderer() -> String {
+    "auto".into()
+}
+
+/// The renderer the windows start with, from the saved choice.
+pub fn renderer_choice(id: &str) -> remedy_ui::RendererChoice {
+    match id {
+        "gpu" => remedy_ui::RendererChoice::Gpu,
+        "cpu" => remedy_ui::RendererChoice::Cpu,
+        _ => remedy_ui::RendererChoice::Auto,
+    }
+}
+
+/// Saves the renderer for the next start.
+pub fn save_renderer(id: &str) {
+    let mut prefs = DesktopPrefs::load();
+    prefs.renderer = match id {
+        "gpu" | "cpu" => id.to_string(),
+        _ => "auto".into(),
+    };
+    prefs.save();
 }
 
 fn yes() -> bool {
@@ -56,6 +83,7 @@ impl Default for DesktopPrefs {
             font_scale: "md".into(),
             launch_at_login: false,
             terminal_shell: String::new(),
+            renderer: "auto".into(),
         }
     }
 }

@@ -278,7 +278,7 @@ fn streaming_pill(ui: &Ui) -> El {
     let accent = colors.accent;
     w::row(ui)
         .align(Align::Center)
-        .gap(6.0)
+        .gap(crate::tokens::space() * 1.5)
         .padding(Insets {
             top: 4.0,
             end: 8.0,
@@ -576,7 +576,7 @@ fn siblings_slot(ui: &Ui, studio: Studio) -> El {
                 StylePatch::new()
                     .foreground(colors.accent)
                     .background(colors.accent.with_alpha(0.12))
-                    .radius(3.0),
+                    .radius(crate::tokens::corner(crate::tokens::Corner::Small)),
             )
             .padding(Insets::symmetric(unit * 0.5, unit))
             .semantics(move || {

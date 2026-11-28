@@ -118,7 +118,7 @@ pub fn connectors(ui: &Ui, s: Settings) -> El {
                     col = col.child(
                         card.child(
                             w::row(ui)
-                                .gap(8.0)
+                                .gap(crate::tokens::space() * 2.0)
                                 .child(
                                     w::button(ui, "Reconnect", move || {
                                         http::request(s, "POST", format!("mcp/servers/{id_again}/reconnect"), None, move |out| {
@@ -189,7 +189,7 @@ pub fn connectors(ui: &Ui, s: Settings) -> El {
             .child(
                 w::row(ui)
                     .align(remedy_ui::layout::Align::Center)
-                    .gap(8.0)
+                    .gap(crate::tokens::space() * 2.0)
                     .fill_width()
                     .child(token.el().grow(1.0))
                     .child(w::reveal_toggle(ui, &token)),

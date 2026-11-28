@@ -204,7 +204,7 @@ fn memory_row(ui: &Ui, row: MemoryRow) -> El {
                 .background(colors.card)
                 .border(colors.line.unwrap_or(colors.muted))
                 .border_width(1.0)
-                .radius(6.0),
+                .radius(crate::tokens::corner(crate::tokens::Corner::Medium)),
         )
         .child(
             w::text(ui, title)
@@ -320,7 +320,7 @@ fn installed(ui: &Ui, studio: Studio) -> El {
         );
         let _ = vis_out.try_set(next);
     });
-    let list = w::column(ui).gap(2.0).layout(|l| l.width = Length::Percent(1.0));
+    let list = w::column(ui).gap(crate::tokens::space() * 0.5).layout(|l| l.width = Length::Percent(1.0));
     let u = ui.clone();
     let list = w::for_each(&list, visible, |row: &SkillRow| row.name.clone(), {
         let st = studio.clone();
@@ -583,7 +583,7 @@ fn library(ui: &Ui, studio: Studio) -> El {
     let st = studio.clone();
     let field = field.on_submit(move || search_library(&st, &f.value()));
     let rows = studio.depth.library_rows.clone();
-    let list = w::column(ui).gap(2.0);
+    let list = w::column(ui).gap(crate::tokens::space() * 0.5);
     let u = ui.clone();
     let list = w::for_each(&list, rows, |row: &SkillRow| row.name.clone(), {
         let st = studio.clone();
@@ -634,7 +634,7 @@ fn library(ui: &Ui, studio: Studio) -> El {
         })
         .child(field.el().layout(|l| l.width = Length::Percent(1.0)))
         .child(count)
-        .child(w::scroll(ui).layout(|l| l.grow = 1.0).child(w::column(ui).gap(2.0).child(list).child(more)))
+        .child(w::scroll(ui).layout(|l| l.grow = 1.0).child(w::column(ui).gap(crate::tokens::space() * 0.5).child(list).child(more)))
 }
 
 fn skill_button(ui: &Ui, studio: Studio, row: SkillRow) -> El {

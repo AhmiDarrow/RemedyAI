@@ -213,7 +213,7 @@ fn bookmarks(ui: &Ui, grove: Grove) -> El {
                     let url_drop = url.clone();
                     w::row(&ui)
                         .align(Align::Center)
-                        .gap(8.0)
+                        .gap(crate::tokens::space() * 2.0)
                         .child(w::button(&ui, title, move || g_open.open_bookmark(&url_open)))
                         .child(w::button(&ui, "Remove", move || g_drop.remove_bookmark(&url_drop)))
                 }

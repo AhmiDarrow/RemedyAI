@@ -1,4 +1,5 @@
-//! Chat markdown: paragraphs, filled inline-code chips, fenced code, diffs, images.
+//! Chat markdown: paragraphs, filled inline-code chips, fenced code, diffs, images, charts,
+//! and tables, lists, headings and quotes through the engine's CommonMark.
 //!
 //! The engine's markdown widget does not paint chip backgrounds, so the feed
 //! opts in itself with [`SpanBackground::chip`]. A plain paragraph stays one
@@ -132,6 +133,78 @@ enum Block {
     Paragraph(String),
     Code { lang: String, text: String },
     Image { alt: String, url: String },
+    Chart(Chart),
+}
+
+/// A ```chart block: `{"type":"bar"|"line","title":"…","unit":"…","labels":[…],
+/// "series":[{"name":"…","values":[…]}]}`. Anything else stays a code block.
+#[derive(Clone, Debug, PartialEq)]
+struct Chart {
+    kind: String,
+    title: String,
+    unit: String,
+    labels: Vec<String>,
+    series: Vec<(String, Vec<f32>)>,
+}
+
+fn parse_chart(text: &str) -> Option<Chart> {
+    let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let kind = match s("type").to_ascii_lowercase().as_str() {
+        "line" => "line",
+        _ => "bar",
+    }
+    .to_string();
+    let labels: Vec<String> = v
+        .get("labels")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().map(|l| l.as_str().map(str::to_string).unwrap_or_else(|| l.to_string())).collect())
+        .unwrap_or_default();
+    let numbers = |x: &serde_json::Value| -> Vec<f32> {
+        x.as_array().map(|a| a.iter().filter_map(|n| n.as_f64()).map(|n| n as f32).collect()).unwrap_or_default()
+    };
+    let mut series: Vec<(String, Vec<f32>)> = v
+        .get("series")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|e| (e.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(), e.get("values").map(numbers).unwrap_or_default()))
+                .filter(|(_, vals)| !vals.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    if series.is_empty() {
+        if let Some(vals) = v.get("values").map(numbers).filter(|v| !v.is_empty()) {
+            series.push((String::new(), vals));
+        }
+    }
+    if series.is_empty() || series.iter().any(|(_, vals)| vals.iter().any(|n| !n.is_finite())) {
+        return None;
+    }
+    Some(Chart { kind, title: s("title"), unit: s("unit"), labels, series })
+}
+
+/// A paragraph with block structure the chat's own run cannot draw: a table, a heading,
+/// a list or a quote. It goes to the engine's CommonMark.
+fn is_structured(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().map(str::trim_start).collect();
+    let table = lines.iter().filter(|l| l.starts_with('|')).count() >= 2;
+    table
+        || lines.iter().any(|l| {
+            l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ") || l.starts_with("> ")
+                || l.starts_with("- ") || l.starts_with("+ ")
+                || (l.starts_with("* ") && !l[2..].contains('*'))
+                || l.split_once(". ").is_some_and(|(n, _)| !n.is_empty() && n.len() <= 3 && n.chars().all(|c| c.is_ascii_digit()))
+        })
+}
+
+/// A link in a reply opens in Remedy's browser (the system browser when that cannot take
+/// it). Only web links: a reply cannot open a file or run anything.
+fn open_link(url: &str) {
+    let url = url.trim();
+    if url.starts_with("https://") || url.starts_with("http://") {
+        crate::settings::open_in_browser_rail(url);
+    }
 }
 
 fn split_blocks(text: &str) -> Vec<Block> {
@@ -158,7 +231,10 @@ fn scan_blocks(text: &str) -> Vec<Block> {
         } else {
             (String::new(), after.to_string(), "")
         };
-        out.push(Block::Code { lang, text: body });
+        match (lang.eq_ignore_ascii_case("chart"), parse_chart(&body)) {
+            (true, Some(chart)) => out.push(Block::Chart(chart)),
+            _ => out.push(Block::Code { lang, text: body }),
+        }
         if next.is_empty() && !rest[start + 3..].contains("```") && fence.is_none() {
             break;
         }
@@ -219,6 +295,11 @@ fn image_line(line: &str) -> Option<(String, String)> {
 fn render_block(ui: &Ui, block: &Block, on_image: impl Fn(String) + Clone + 'static) -> El {
     let chip = ui.theme().colors.bg.mix_oklab(ui.theme().colors.accent, 0.22);
     match block {
+        Block::Paragraph(text) if is_structured(text) => remedy_ui::rich::markdown(ui, text.clone(), open_link).layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        }),
+        Block::Chart(chart) => chart_block(ui, chart),
         Block::Paragraph(text) => ui
             .el("bubble-body")
             .text(inline_rich(text, chip))
@@ -239,6 +320,81 @@ fn render_block(ui: &Ui, block: &Block, on_image: impl Fn(String) + Clone + 'sta
     }
 }
 
+/// A chart she drew in a reply. Bars are labelled rows (label, bar, value); a line is a
+/// sparkline per series with its range under it.
+fn chart_block(ui: &Ui, chart: &Chart) -> El {
+    use crate::tokens;
+    let colors = ui.theme().colors.clone();
+    let unit = ui.theme().spacing.unit;
+    let mut col = w::column(ui).gap(unit).padding(Insets::all(unit * 2.0)).layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    })
+    .style(tokens::well_surface(&colors));
+    if !chart.title.is_empty() {
+        col = col.child(w::text(ui, chart.title.clone()).variant("strong"));
+    }
+    let fmt = |n: f32| {
+        let v = if n.fract() == 0.0 { format!("{n:.0}") } else { format!("{n:.2}") };
+        if chart.unit.is_empty() { v } else { format!("{v} {}", chart.unit) }
+    };
+    if chart.kind == "line" {
+        for (name, values) in &chart.series {
+            let lo = values.iter().cloned().fold(f32::INFINITY, f32::min);
+            let hi = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let label = if name.is_empty() { chart.title.clone() } else { name.clone() };
+            if !name.is_empty() {
+                col = col.child(w::text(ui, name.clone()).variant("muted"));
+            }
+            let line = remedy_ui::viz::sparkline(
+                ui,
+                label,
+                Signal::new(values.clone()),
+                remedy_ui::viz::SparklineOptions::default().fill(true).dot(true).height(unit * 14.0),
+            );
+            let span = match (chart.labels.first(), chart.labels.last()) {
+                (Some(a), Some(b)) if chart.labels.len() > 1 => format!("{a} – {b} · low {} · high {}", fmt(lo), fmt(hi)),
+                _ => format!("low {} · high {}", fmt(lo), fmt(hi)),
+            };
+            col = col.child(line).child(w::text(ui, span).variant("muted"));
+        }
+        return col;
+    }
+    let (name, values) = &chart.series[0];
+    if !name.is_empty() && chart.series.len() == 1 {
+        col = col.child(w::text(ui, name.clone()).variant("muted"));
+    }
+    let top = values.iter().cloned().fold(0.0f32, f32::max).max(f32::EPSILON);
+    for (i, value) in values.iter().enumerate() {
+        let label = chart.labels.get(i).cloned().unwrap_or_else(|| format!("{}", i + 1));
+        let share = (value.max(0.0) / top).clamp(0.0, 1.0);
+        let bar = ui.el("chart-bar").layout(move |l| {
+            l.width = Length::Percent(share.max(0.005));
+            l.height = Length::Px(unit * 2.5);
+        })
+        .style(StylePatch::new().background(colors.accent).radius(crate::tokens::corner(crate::tokens::Corner::Small)));
+        let track = w::row(ui).layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(bar);
+        col = col.child(
+            w::row(ui)
+                .gap(unit)
+                .align(remedy_ui::layout::Align::Center)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(w::text(ui, label).nowrap().layout(|l| {
+                    l.width = Length::Px(120.0);
+                    l.shrink = 0.0;
+                }))
+                .child(track)
+                .child(w::text(ui, fmt(*value)).nowrap().variant("muted")),
+        );
+    }
+    col
+}
+
 fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
     use crate::tokens;
     use remedy_ui::layout::Align;
@@ -250,7 +406,7 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
         .style(
             tokens::chip(&colors, false)
                 .mono(true)
-                .text_size(11.0)
+                .text_size(crate::tokens::size(crate::tokens::CAPTION))
                 .padding(Insets {
                     top: 2.0,
                     end: 6.0,
@@ -265,7 +421,7 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
     .style(StylePatch::new().foreground(colors.muted));
     let head = w::row(ui)
         .align(Align::Center)
-        .gap(tokens::SPACE * 2.0)
+        .gap(tokens::space() * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .child(chip)
         .child(ui.el("code-head-flex").layout(|l| {
@@ -290,7 +446,7 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
         body = body.child(
             w::text(ui, line)
                 .selectable(true)
-                .style(StylePatch::new().mono(true).text_size(12.5).foreground(fg))
+                .style(StylePatch::new().mono(true).text_size(crate::tokens::size(crate::tokens::META)).foreground(fg))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
@@ -299,8 +455,8 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
     }
 
     w::column(ui)
-        .gap(tokens::SPACE * 2.0)
-        .padding(Insets::all(tokens::SPACE * 2.0))
+        .gap(tokens::space() * 2.0)
+        .padding(Insets::all(tokens::space() * 2.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -320,7 +476,7 @@ fn diff_block(ui: &Ui, text: &str) -> El {
     let colors = ui.theme().colors.clone();
     let mut col = w::column(ui)
         .gap(0.0)
-        .padding(Insets::all(6.0))
+        .padding(Insets::all(crate::tokens::space() * 1.5))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -343,7 +499,7 @@ fn diff_block(ui: &Ui, text: &str) -> El {
         col = col.child(
             w::text(ui, line)
                 .selectable(true)
-                .style(StylePatch::new().foreground(color).mono(true).text_size(12.0))
+                .style(StylePatch::new().foreground(color).mono(true).text_size(crate::tokens::size(crate::tokens::META)))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
@@ -519,6 +675,34 @@ fn decode_bytes(bytes: &[u8]) -> Option<Image> {
         decoded.image.height,
         decoded.image.pixels,
     ))
+}
+
+#[cfg(test)]
+mod chart_tests {
+    use super::*;
+
+    /// A chart block becomes a chart; a broken one stays readable as code.
+    #[test]
+    fn a_chart_block_is_drawn_and_a_broken_one_stays_code() {
+        let good = "Here:\n\n```chart\n{\"type\":\"line\",\"title\":\"Builds\",\"labels\":[\"Mon\",\"Tue\"],\"series\":[{\"name\":\"s\",\"values\":[3,5]}]}\n```\n";
+        let blocks = split_blocks(good);
+        assert!(matches!(&blocks[1], Block::Chart(c) if c.kind == "line" && c.series[0].1 == vec![3.0, 5.0]));
+        let short = "```chart\n{\"values\":[1,2,3]}\n```";
+        assert!(matches!(&split_blocks(short)[0], Block::Chart(c) if c.kind == "bar" && c.series.len() == 1));
+        let broken = "```chart\nnot json\n```";
+        assert!(matches!(&split_blocks(broken)[0], Block::Code { lang, .. } if lang == "chart"));
+    }
+
+    /// Tables, headings, lists and quotes go to CommonMark; prose keeps the chat's run.
+    #[test]
+    fn structure_is_recognised() {
+        for yes in ["| a | b |\n|---|---|", "# Plan", "- one\n- two", "1. first\n2. second", "> quoted"] {
+            assert!(is_structured(yes), "{yes}");
+        }
+        for no in ["Plain words.", "*emphasis* only", "Costs 3. Then more", "a | b"] {
+            assert!(!is_structured(no), "{no}");
+        }
+    }
 }
 
 #[cfg(test)]

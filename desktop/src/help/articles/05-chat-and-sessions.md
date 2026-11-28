@@ -36,7 +36,7 @@ code, and file paths stay as written. Help in this wiki is still English.
 
 | Input | Action |
 |-------|--------|
-| **Enter** | Send; while Remedy works, steer the current turn |
+| **Enter** | Send; while Remedy works, steer the current turn (she reads it when her current step finishes, answers it in a line and keeps going unless you say stop) |
 | **Ctrl+Enter** | Interrupt a running turn with your message |
 | **Alt+Enter** | Queue a message after the current turn |
 | **Shift+Enter** | New line |
@@ -191,6 +191,37 @@ Controls the **tool trail** under assistant messages. The model’s **chat answe
 
 Change via status bar or Settings. Full keeps process expanded after the turn so nothing important is buried.
 
+## A conversation while she works
+
+Remedy talks with you while she works, the way a colleague would. Her reply is one
+message: what she says, and between her sentences a quiet line for the steps she
+ran (**▸ Bash ×3 · Read**). While a step runs the line says what it is
+(**Running Bash: cargo build**). A **Thinking** line shows the thought she is on;
+click it for all of it. The actions pane on the left follows the work as it
+happens.
+
+**Settings → You & Agent → While she works** sets how much she tells you:
+**Every step** (the default: a line before each batch of tools and after what she
+finds), **Key moments** (start, a change of plan, a failure, done) or **Only at
+the end**. If she goes several rounds without a word, Remedy asks her to say what
+she is doing. This works the same for every provider.
+
+**Communication style** (You & Agent) is how she talks: **Balanced**, **Warm**,
+**Candid**, **Efficient**, **Detailed** or **Playful**. Every style keeps you posted.
+
+## Pictures, tables and charts
+
+Her replies can carry tables, lists, headings and quotes, images (a web link or a
+file on this computer) and charts. A chart is a fenced block named `chart`:
+
+```text
+```chart
+{"type": "bar", "title": "Builds per day", "labels": ["Mon", "Tue"], "series": [{"name": "builds", "values": [3, 5]}]}
+```
+```
+
+`type` is `bar` or `line`. Links open in Remedy's browser; only web links open.
+
 ## Thinking & approvals
 
 - **Think** level (Off–High) — how much reasoning detail the UI emphasizes
@@ -228,7 +259,7 @@ Default **New Session** still uses Settings → default project folder when set.
 
 ## Appearance
 
-Settings → **Appearance**: theme, text size (S–XL), density, higher contrast, reduce motion, optional accent. Ctrl+= / Ctrl+- / Ctrl+0 resize text. Does not change provider or data.
+Settings → **Appearance**: theme, text size (S–XL), density, **corners** (Square or Rounded), higher contrast, reduce motion, optional accent, and **Drawing** (Automatic, Graphics card or Processor; it applies the next time Remedy starts). Ctrl+= / Ctrl+- / Ctrl+0 resize text. Every size, corner, colour and space follows the theme, so text size, density and corners reach the whole window. Does not change provider or data.
 
 ## Related
 

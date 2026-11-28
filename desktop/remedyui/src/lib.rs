@@ -23,7 +23,7 @@ mod palette;
 pub mod phone;
 mod panels;
 mod plan_dock;
-mod prefs;
+pub mod prefs;
 mod presence;
 mod presence_draw;
 mod face_skin;
@@ -514,8 +514,8 @@ pub fn design_presence(ui: &Ui, state: presence::State) -> El {
         w::column(ui)
             .align(Align::Center)
             .justify(Justify::Center)
-            .gap(tokens::GUTTER)
-            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .gap(tokens::gutter())
+            .padding(Insets::all(tokens::gutter() * 2.0))
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.height = Length::Percent(1.0);
@@ -590,7 +590,7 @@ pub fn design_moods(ui: &Ui, size: f32) -> El {
         let moods = presence::Mood::all();
         let mut col = w::column(ui)
             .align(Align::Start)
-            .gap(tokens::GUTTER * 2.0)
+            .gap(tokens::gutter() * 2.0)
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
@@ -599,7 +599,7 @@ pub fn design_moods(ui: &Ui, size: f32) -> El {
             let mut row = w::row(ui)
                 .align(Align::Start)
                 .justify(Justify::SpaceBetween)
-                .gap(tokens::GUTTER)
+                .gap(tokens::gutter())
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
@@ -609,7 +609,7 @@ pub fn design_moods(ui: &Ui, size: f32) -> El {
                     .style(tokens::typo(tokens::META).foreground(colors.muted));
                 let cell = w::column(ui)
                     .align(Align::Center)
-                    .gap(tokens::SPACE * 2.0)
+                    .gap(tokens::space() * 2.0)
                     .child(presence::preview_stage(ui, *mood, size, 2))
                     .child(label);
                 row = row.child(cell);
@@ -619,8 +619,8 @@ pub fn design_moods(ui: &Ui, size: f32) -> El {
         w::column(ui)
             .align(Align::Start)
             .justify(Justify::Center)
-            .gap(tokens::GUTTER)
-            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .gap(tokens::gutter())
+            .padding(Insets::all(tokens::gutter() * 2.0))
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.height = Length::Percent(1.0);
@@ -658,11 +658,11 @@ pub fn design_grown(ui: &Ui) -> El {
             ("Years", face_skin::Facts { sessions: 400, messages: 20000, days: 900, goals: 6 }),
         ];
         let mut col = w::column(ui)
-            .gap(tokens::GUTTER)
-            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .gap(tokens::gutter())
+            .padding(Insets::all(tokens::gutter() * 2.0))
             .style(StylePatch::new().background(colors.bg).foreground(colors.text));
         for (label, facts) in uses {
-            let mut row = w::row(ui).align(Align::Center).gap(tokens::GUTTER * 2.0).child(
+            let mut row = w::row(ui).align(Align::Center).gap(tokens::gutter() * 2.0).child(
                 w::text(ui, label)
                     .style(tokens::typo(tokens::TITLE).foreground(colors.text))
                     .layout(|l| l.width = Length::Px(160.0)),
@@ -711,7 +711,7 @@ pub fn design_evolution(ui: &Ui) -> El {
         let mut row = w::row(ui)
             .align(Align::Start)
             .justify(Justify::SpaceBetween)
-            .gap(tokens::GUTTER)
+            .gap(tokens::gutter())
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
@@ -728,7 +728,7 @@ pub fn design_evolution(ui: &Ui) -> El {
                 });
             let cell = w::column(ui)
                 .align(Align::Start)
-                .gap(tokens::SPACE * 2.0)
+                .gap(tokens::space() * 2.0)
                 .child(presence::preview_stage(ui, presence::Mood::Idle, 144.0, stage))
                 .child(label)
                 .child(cap);
@@ -737,8 +737,8 @@ pub fn design_evolution(ui: &Ui) -> El {
         w::column(ui)
             .align(Align::Start)
             .justify(Justify::Center)
-            .gap(tokens::GUTTER)
-            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .gap(tokens::gutter())
+            .padding(Insets::all(tokens::gutter() * 2.0))
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.height = Length::Percent(1.0);
@@ -785,7 +785,7 @@ pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
         let mut row = w::row(ui)
             .align(Align::Start)
             .justify(Justify::SpaceBetween)
-            .gap(tokens::GUTTER)
+            .gap(tokens::gutter())
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
@@ -795,7 +795,7 @@ pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
                 .style(tokens::typo(tokens::META).foreground(colors.muted));
             let cell = w::column(ui)
                 .align(Align::Center)
-                .gap(tokens::SPACE * 2.0)
+                .gap(tokens::space() * 2.0)
                 .child(presence::preview(ui, state, size))
                 .child(label);
             row = row.child(cell);
@@ -803,8 +803,8 @@ pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
         w::column(ui)
             .align(Align::Start)
             .justify(Justify::Center)
-            .gap(tokens::GUTTER)
-            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .gap(tokens::gutter())
+            .padding(Insets::all(tokens::gutter() * 2.0))
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.height = Length::Percent(1.0);

@@ -147,6 +147,11 @@ pub fn load_into(s: Settings) {
             s.density.set(v);
         }
     }
+    if let Some(v) = logic::table_string(&text, "appearance", "corners") {
+        if v == "square" || v == "rounded" {
+            s.corners.set(v);
+        }
+    }
     if let Some(v) = logic::table_string(&text, "appearance", "font_scale") {
         if matches!(v.as_str(), "sm" | "md" | "lg" | "xl") {
             s.font_scale.set(v);
@@ -213,6 +218,12 @@ pub fn apply(s: Settings) {
     theme.type_scale.small *= factor;
     theme.type_scale.body *= factor;
     theme.type_scale.title *= factor;
+    let rounded = s.corners.get() == "rounded";
+    if rounded {
+        theme.radii.small = 6.0;
+        theme.radii.medium = 10.0;
+        theme.radii.large = 14.0;
+    }
     if s.density.get() == "compact" {
         theme.density = Density::Compact;
         theme.spacing.unit = (theme.spacing.unit * 0.85).max(2.0);
@@ -256,6 +267,7 @@ pub fn persist(s: Settings) {
     let appearance = [
         ("theme", logic::toml_quote(&s.theme_id.get())),
         ("density", logic::toml_quote(&s.density.get())),
+        ("corners", logic::toml_quote(&s.corners.get())),
         ("font_scale", logic::toml_quote(&s.font_scale.get())),
         ("reduce_motion", bool_toml(s.reduce_motion.get())),
         ("show_presence", bool_toml(s.show_presence.get())),
@@ -297,6 +309,7 @@ fn parse_accent(raw: &str) -> Option<Color> {
 /// Gives the window `theme`, and has the surfaces that copied the old one built again.
 fn paint(ui: &Ui, theme: remedy_ui::core::style::Theme) {
     mark_painted(ui);
+    crate::tokens::adopt(&theme);
     let changed = ui.theme() != theme;
     let sheet = sheet(&theme);
     ui.set_theme(theme, sheet);
@@ -306,8 +319,7 @@ fn paint(ui: &Ui, theme: remedy_ui::core::style::Theme) {
 }
 
 fn on_accent(c: Color) -> Color {
-    let y = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    if y > 0.62 { Color::BLACK } else { Color::WHITE }
+    crate::tokens::on_color(c)
 }
 
 pub fn set_theme(s: Settings, id: &str) {
