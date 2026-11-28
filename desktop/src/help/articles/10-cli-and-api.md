@@ -109,6 +109,40 @@ Authorization: Bearer <local_api_token>
 | Gateway tokens | Prefer `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN` / `SLACK_BOT_TOKEN`. CLI `--*-token` flags are visible in process lists. |
 | Exit codes | No subcommand → **2**. Unknown / invalid input → **2**. Not found / tool failure → **1**. |
 
+## Connectors
+
+A connector gives Remedy the tools of an outside service through MCP, the
+common protocol for this. GitHub, issue trackers, databases and many other
+services publish an MCP server; Remedy can use any of them. No connector is
+built in and none is contacted until you add it.
+
+**Add one:** Settings → Connections → Connectors. Give it a short name and
+either a URL (a hosted server) or the command that starts it on this computer
+(for example `npx -y some-mcp-server`). If the service needs a token, type it
+there: a URL connector gets it as a bearer header, a command connector reads
+it from the variable you name. The token is kept in Remedy's secret store,
+not in `config.toml`.
+
+**What Remedy sees:** each of the connector's tools, named
+`mcp.<connector>.<tool>`. `/connectors` lists your connectors, whether each is
+connected, and how many tools it gives her. At most 64 tools are taken from
+one connector; the list says when more were left out.
+
+**When she may use them:**
+
+| Approval mode | A connector's tool |
+|---|---|
+| Ask | waits for you, like everything else |
+| Auto | waits for you, unless you set that connector to "Run without asking" |
+| Full | runs |
+
+A message that came from outside (a messenger contact, another bot) can never
+use a connector.
+
+In `config.toml` the list is `mcp_servers`; each entry has `name`, then `url`
+or `command` and `args`, and optionally `token_env`, `approval` (`ask` or
+`auto`) and `enabled`.
+
 ## Channels & plugins
 
 CLI can enable Telegram / Discord / Slack gateways and load plugins — see repo `docs/USAGE.md` for full flags. Desktop chat does not require those channels. Prefer env vars for bot tokens (do not pass `--telegram-token` on shared machines).
