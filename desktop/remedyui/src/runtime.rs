@@ -301,6 +301,11 @@ pub fn install_panic_hook() {
                 .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
                 .unwrap_or_else(|| "unknown".into());
             let payload = panic_payload(info);
+            // A binding that fails on every run would write a backtrace each time and fill
+            // the disk. The first one of a kind is enough.
+            if !first_of_its_kind(&format!("{loc} {payload}")) {
+                return;
+            }
             let backtrace = std::backtrace::Backtrace::force_capture();
             log_desktop(&format_panic(
                 name,
@@ -334,6 +339,33 @@ pub fn contain_unowned_binding_panics(main: &remedy_ui::Ui) {
         log_desktop(&format!("CONTAINED a binding panic (made at {at}): {}", c.message));
         true
     });
+}
+
+/// True the first time `key` is seen in this run of the app.
+fn first_of_its_kind(key: &str) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    SEEN.get_or_init(Default::default)
+        .lock()
+        .map(|mut seen| seen.insert(key.to_string()))
+        .unwrap_or(true)
+}
+
+/// Logs each failure a window's error boundary (or the window itself) caught, once per
+/// kind: what failed, the element's path in the tree, and where it was made.
+pub fn log_window_failures(ui: &remedy_ui::Ui) {
+    ui.set_error_hook(Some(std::rc::Rc::new(|e: &remedy_ui::CaughtError| {
+        let at = e
+            .location
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown".into());
+        if first_of_its_kind(&format!("{at} {} {}", e.element_path, e.message)) {
+            log_desktop(&format!(
+                "CAUGHT {:?} failure at {} (made at {at}): {}",
+                e.phase, e.element_path, e.message
+            ));
+        }
+    })));
 }
 
 fn panic_payload(info: &std::panic::PanicHookInfo<'_>) -> String {
